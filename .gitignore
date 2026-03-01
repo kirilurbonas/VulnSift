@@ -1,0 +1,37 @@
+# Environment
+.env
+.venv
+venv
+env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+*.egg
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Testing / coverage
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local outputs (root-level only; vulnsift/output/ is the package)
+*.sarif
+/output/
+/reports/

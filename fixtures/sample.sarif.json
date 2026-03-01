@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "VulnSift Test Scanner",
+          "rules": [
+            {
+              "id": "SQLi",
+              "shortDescription": { "text": "SQL injection" },
+              "fullDescription": { "text": "User input may be concatenated into SQL query." }
+            }
+          ]
+        }
+      },
+      "artifacts": [
+        { "location": { "uri": "src/app.py" } }
+      ],
+      "results": [
+        {
+          "ruleId": "SQLi",
+          "level": "error",
+          "message": { "text": "Potential SQL injection at line 42." },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactIndex": 0,
+                "region": { "startLine": 42, "endLine": 42, "snippet": { "text": "cursor.execute(query)" } }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

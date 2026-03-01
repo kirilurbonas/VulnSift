@@ -1,0 +1,15 @@
+{
+  "vulnerabilities": [
+    {
+      "id": "SNYK-JS-LODASH-590103",
+      "title": "Prototype Pollution in lodash",
+      "description": "Versions of lodash prior to 4.17.21 are vulnerable to prototype pollution.",
+      "severity": "high",
+      "packageName": "lodash",
+      "moduleName": "my-app",
+      "version": "4.17.15",
+      "identifiers": { "CVE": ["CVE-2020-8203"], "CWE": ["CWE-1321"] },
+      "from": ["my-app", "lodash@4.17.15"]
+    }
+  ]
+}
