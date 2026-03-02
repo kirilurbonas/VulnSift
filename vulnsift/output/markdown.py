@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from vulnsift.models import RemediationCard, TriageReportEntry
+from vulnsift.models import TriageReportEntry
 
 
 def render_remediation_card(entry: TriageReportEntry) -> str:

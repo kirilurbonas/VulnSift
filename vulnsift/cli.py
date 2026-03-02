@@ -36,7 +36,13 @@ def main() -> None:
 
 
 @main.command()
-@click.option("--input", "input_path", required=True, type=click.Path(exists=True), help="Scan file (SARIF, Snyk, Semgrep, Trivy).")
+@click.option(
+    "--input",
+    "input_path",
+    required=True,
+    type=click.Path(exists=True),
+    help="Scan file (SARIF, Snyk, Semgrep, Trivy).",
+)
 @click.option(
     "--format",
     "fmt",
@@ -51,7 +57,12 @@ def main() -> None:
     default=None,
     help="Export report: json, md (per-file cards), or md-single (one file).",
 )
-@click.option("--output-dir", type=click.Path(), default=None, help="Dir for Markdown/JSON (default: from config or ./vulnsift-output).")
+@click.option(
+    "--output-dir",
+    type=click.Path(),
+    default=None,
+    help="Dir for Markdown/JSON (default: from config or ./vulnsift-output).",
+)
 @click.option("--context", default=None, help="Project context (e.g. 'Python app, internal only'). Overrides config.")
 @click.option("--include-fp", is_flag=True, help="Include likely false positives in summary table.")
 @click.option("--limit", type=int, default=None, help="Max number of findings to triage (for testing).")

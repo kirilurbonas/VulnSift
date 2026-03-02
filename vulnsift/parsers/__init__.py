@@ -3,8 +3,8 @@
 from pathlib import Path
 
 from vulnsift.parsers.sarif import parse_sarif
-from vulnsift.parsers.snyk import parse_snyk
 from vulnsift.parsers.semgrep import parse_semgrep
+from vulnsift.parsers.snyk import parse_snyk
 from vulnsift.parsers.trivy import parse_trivy
 
 __all__ = [
@@ -32,8 +32,8 @@ def detect_format(path: str | Path) -> str:
     try:
         import json
         data = json.loads(raw)
-    except Exception:
-        raise ValueError(f"Cannot parse as JSON: {path}")
+    except Exception as err:
+        raise ValueError(f"Cannot parse as JSON: {path}") from err
 
     if not isinstance(data, dict):
         # Trivy can be a list

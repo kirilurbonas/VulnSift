@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from vulnsift.models import TriageReport, TriageReportEntry
+from vulnsift.models import TriageReport
 
 try:
     from rich.console import Console
-    from rich.table import Table
     from rich.progress import Progress, SpinnerColumn, TextColumn
+    from rich.table import Table
 except ImportError:
     Console = None  # type: ignore
     Table = None

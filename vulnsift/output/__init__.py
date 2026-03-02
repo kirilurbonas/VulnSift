@@ -1,8 +1,8 @@
 """Rich CLI renderer, Markdown cards, JSON export."""
 
 from vulnsift.output.console import render_summary_table
-from vulnsift.output.markdown import render_remediation_cards, render_remediation_cards_single
 from vulnsift.output.json_export import export_report_json
+from vulnsift.output.markdown import render_remediation_cards, render_remediation_cards_single
 
 __all__ = [
     "render_summary_table",
