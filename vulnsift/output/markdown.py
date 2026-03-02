@@ -54,3 +54,27 @@ def render_remediation_cards(
         path.write_text(render_remediation_card(entry), encoding="utf-8")
         written.append(path)
     return written
+
+
+def render_remediation_cards_single(
+    entries: list[TriageReportEntry],
+    path: str | Path,
+    *,
+    only_actionable: bool = True,
+) -> Path:
+    """
+    Write all remediation cards into a single Markdown file.
+    Returns the written path.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if only_actionable:
+        entries = [e for e in entries if not e.triage.is_likely_false_positive]
+    parts: list[str] = ["# Remediation report\n"]
+    for i, entry in enumerate(entries, 1):
+        if not entry.remediation:
+            continue
+        parts.append(f"\n---\n\n## Finding {i}\n\n")
+        parts.append(render_remediation_card(entry))
+    path.write_text("\n".join(parts), encoding="utf-8")
+    return path

@@ -1,0 +1,16 @@
+{
+  "results": [
+    {
+      "check_id": "python.lang.security.audit.unsafe-deserialization.pickle",
+      "path": "src/utils.py",
+      "start": { "line": 10, "col": 1 },
+      "end": { "line": 10, "col": 20 },
+      "extra": {
+        "message": "Unsafe use of pickle. Consider using a safer serialization.",
+        "severity": "WARNING",
+        "metadata": { "cwe": "CWE-502", "cve": null }
+      }
+    }
+  ],
+  "paths": { "scanned": ["src/utils.py"] }
+}

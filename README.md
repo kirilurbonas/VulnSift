@@ -8,7 +8,7 @@ VulnSift ingests scan output (SARIF or Snyk JSON), runs Claude-powered triage to
 
 ## Key features
 
-- **Multi-scanner ingestion**: Read SARIF 2.1.0 and Snyk JSON scan results and normalize them into a single `UnifiedFinding` model.
+- **Multi-scanner ingestion**: Read SARIF 2.1.0, Snyk, Semgrep, and Trivy JSON and normalize them into a single `UnifiedFinding` model. Use `--format auto` to detect format from file content.
 - **AI triage with risk scoring**: Use Claude to assess exploitability and business context, producing a VulnSift Risk Score (0–10) and a likely-false-positive flag.
 - **Developer-friendly remediation cards**: Generate Markdown cards with business impact, step-by-step fixes, code snippets, and references.
 - **Rich CLI experience**: Colour-coded summary table, optional JSON export for full audit, and fixtures for trying the tool without a real scan.
@@ -43,11 +43,11 @@ export ANTHROPIC_API_KEY=sk-ant-...
 ### Usage overview
 
 ```bash
-# 1) Sanity-check a scan file (no API calls)
-vulnsift validate --input scan.sarif --format sarif
+# 1) Sanity-check a scan file (no API calls; format auto-detected)
+vulnsift validate --input scan.sarif --format auto
 
 # 2) Triage findings and write remediation cards + JSON report
-vulnsift triage --input scan.sarif --format sarif --export json --output-dir ./out
+vulnsift triage --input scan.sarif --format auto --export json --output-dir ./out
 
 # 3) Re-print a summary from a previous JSON report
 vulnsift report --input ./out/triage-report.json
@@ -55,19 +55,22 @@ vulnsift report --input ./out/triage-report.json
 
 ### Usage: validate
 
-Validate a scan file and see how many findings VulnSift can parse (no calls to the Claude API):
+Validate a scan file and see how many findings VulnSift can parse (no API calls):
 
 ```bash
-vulnsift validate --input scan.sarif --format sarif
+vulnsift validate --input scan.sarif --format auto
 ```
 
 ### Usage: triage
 
-Run AI triage over findings, print a risk-ranked summary table, and write remediation cards and an optional JSON report:
+Run AI triage over findings, print a risk-ranked summary table, and write remediation cards and an optional JSON or single-Markdown report:
 
 ```bash
-vulnsift triage --input scan.sarif --format sarif --export json --output-dir ./out
+vulnsift triage --input scan.sarif --format auto --export json --output-dir ./out
+vulnsift triage --input scan.sarif --export md-single   # one remediation.md file
 ```
+
+Use `--dry-run` to parse only (no API calls). Use `--limit N` to triage at most N findings (e.g. for testing). Use `--verbose` for extra logging.
 
 ### Usage: report
 
@@ -82,34 +85,65 @@ vulnsift report --input ./out/triage-report.json
 | Command    | Description |
 |-----------|-------------|
 | `triage`  | Parse a scan file, triage each finding with Claude, print a colour summary table, and write Markdown remediation cards. Use `--export json` to save the full report. |
-| `validate`| Parse and validate a scan file (SARIF or Snyk JSON) without calling the API. |
+| `validate`| Parse and validate a scan file (SARIF, Snyk, Semgrep, Trivy; use `--format auto` to detect) without calling the API. |
 | `report`  | Print a summary table from a previously exported `triage-report.json`. |
 
 ## Options (triage)
 
-- **`--input`** — Scan file path (SARIF or Snyk JSON).
-- **`--format`** — `sarif` or `snyk`.
-- **`--export json`** — Write full triage report (all findings, including false positives) to JSON in the output dir.
-- **`--output-dir`** — Directory for Markdown cards and optional JSON (default: `./vulnsift-output`).
-- **`--context`** — Optional project context for risk assessment (e.g. `"Python app, internal only"`).
-- **`--include-fp`** — Include likely false positives in the summary table (they always appear in the full JSON export).
+- **`--input`** — Scan file path (SARIF, Snyk, Semgrep, or Trivy JSON).
+- **`--format`** — `sarif`, `snyk`, `semgrep`, `trivy`, or `auto` (default: auto-detect from file).
+- **`--export`** — `json` (full report), `md` (per-finding cards), or `md-single` (one `remediation.md`).
+- **`--output-dir`** — Directory for Markdown/JSON (default: from `vulnsift.yaml` or `./vulnsift-output`).
+- **`--context`** — Project context for risk assessment (overrides config).
+- **`--include-fp`** — Include likely false positives in the summary table.
+- **`--limit N`** — Triage at most N findings (for testing).
+- **`--dry-run`** — Parse and validate only; do not call the triage API.
+- **`--verbose`** / **`-v`** — Verbose output.
+
+## Config file
+
+Optional `vulnsift.yaml` or `.vulnsift.yaml` in the project root:
+
+```yaml
+project_context: "Python app, internal only"
+output_dir: ./vulnsift-output
+api_key_file: .secrets/anthropic_key
+```
+
+CLI options override these values.
 
 ## Supported scan formats
 
-- **SARIF 2.1.0** — Generic SAST output (e.g. many commercial and open-source scanners).
+- **SARIF 2.1.0** — Generic SAST output (many commercial and open-source scanners).
 - **Snyk JSON** — Output from `snyk test --json`.
+- **Semgrep JSON** — Output from `semgrep scan --json`.
+- **Trivy JSON** — Output from `trivy scan -f json` (e.g. `Results[].Vulnerabilities`).
 
 ## Sample fixtures
 
 The repo includes minimal sample files under `fixtures/`:
 
-- `fixtures/sample.sarif.json` — SARIF 2.1.0 file with a single SQL injection finding in `src/app.py`; useful for demoing `validate` and `triage`.
-- `fixtures/sample.snyk.json` — Snyk-style JSON with one `lodash` vulnerability; useful for checking the Snyk parser and CLI behaviour.
+- `fixtures/sample.sarif.json` — SARIF 2.1.0 with one SQL injection finding.
+- `fixtures/sample.snyk.json` — Snyk-style JSON with one `lodash` vulnerability.
+- `fixtures/sample.semgrep.json` — Semgrep result (e.g. unsafe pickle).
+- `fixtures/sample.trivy.json` — Trivy vulnerability result.
 
-Use them to try the CLI without a real scan:
+Try the CLI without a real scan:
 
 ```bash
-vulnsift validate --input fixtures/sample.sarif.json --format sarif
+vulnsift validate --input fixtures/sample.sarif.json --format auto
+```
+
+## Running VulnSift in CI
+
+Example GitHub Actions job (run after a scanner step that produces a SARIF or JSON file):
+
+```yaml
+- name: VulnSift triage
+  env:
+    ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+  run: |
+    vulnsift triage --input scan-results.sarif --format auto --export json --output-dir ./vulnsift-out
 ```
 
 ## Development

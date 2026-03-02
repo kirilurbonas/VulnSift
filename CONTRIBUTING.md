@@ -25,6 +25,19 @@ Triage tests mock the Anthropic API; no key is required for CI.
 ruff check vulnsift tests
 ```
 
+## Pre-commit (optional)
+
+To run ruff before each commit, install [pre-commit](https://pre-commit.com/) and add to `.pre-commit-config.yaml`:
+
+```yaml
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.0
+    hooks:
+      - id: ruff
+        args: [--fix]
+```
+
 ## Submitting changes
 
 Open a pull request against `main`. Ensure CI (lint + tests) passes.

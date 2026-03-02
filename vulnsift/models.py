@@ -30,7 +30,7 @@ class UnifiedFinding(BaseModel):
     cwe: str | None = None
     location: Location = Field(default_factory=Location)
     raw: dict[str, Any] = Field(default_factory=dict)
-    source_format: str = ""  # "sarif" | "snyk"
+    source_format: str = ""  # "sarif" | "snyk" | "semgrep" | "trivy"
 
 
 class TriageResult(BaseModel):
@@ -63,5 +63,6 @@ class TriageReportEntry(BaseModel):
 class TriageReport(BaseModel):
     """Full triage report: all findings with triage and remediation."""
 
+    schema_version: str = "1.0"
     entries: list[TriageReportEntry] = Field(default_factory=list)
     source_file: str = ""
