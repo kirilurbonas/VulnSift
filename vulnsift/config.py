@@ -12,7 +12,9 @@ class VulnSiftConfig(BaseModel):
 
     project_context: str | None = Field(default=None, description="Project context for triage.")
     output_dir: str = Field(default="./vulnsift-output", description="Default output directory.")
-    api_key_file: str | None = Field(default=None, description="Path to file containing OPENAI_API_KEY.")
+    api_key_file: str | None = Field(default=None, description="Path to file containing ANTHROPIC_API_KEY.")
+    redact_code: bool = Field(default=False, description="Do not send code snippets to the AI model.")
+    gate_threshold: float | None = Field(default=None, description="Exit with code 2 if any non-FP risk >= this.")
 
 
 CONFIG_FILENAMES = ("vulnsift.yaml", ".vulnsift.yaml")
@@ -46,4 +48,6 @@ def load_config(cwd: str | Path | None = None) -> VulnSiftConfig:
         project_context=data.get("project_context"),
         output_dir=data.get("output_dir", "./vulnsift-output"),
         api_key_file=data.get("api_key_file"),
+        redact_code=bool(data.get("redact_code", False)),
+        gate_threshold=data.get("gate_threshold"),
     )

@@ -64,5 +64,6 @@ class TriageReport(BaseModel):
     """Full triage report: all findings with triage and remediation."""
 
     schema_version: str = "1.0"
+    prompt_version: str = "1.0"
     entries: list[TriageReportEntry] = Field(default_factory=list)
     source_file: str = ""

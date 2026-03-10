@@ -26,6 +26,7 @@ from vulnsift.output import (
 from vulnsift.output.console import progress_spinner
 from vulnsift.parsers import SUPPORTED_FORMATS, detect_format, parse_scan_file
 from vulnsift.triage.agent import triage_finding
+from vulnsift.triage.prompts import PROMPT_VERSION
 
 console = Console()
 
@@ -62,6 +63,7 @@ Examples:
   vulnsift triage --input scan.sarif --dry-run
   vulnsift triage --input scan.sarif --limit 10 --output-dir ./out
   vulnsift triage --input scan.sarif --redact-code --gate-threshold 7
+  vulnsift triage --input scan.sarif --sample 50
 """,
 )
 @click.option(
@@ -93,7 +95,8 @@ Examples:
 )
 @click.option("--context", default=None, help="Project context (e.g. 'Python app, internal only'). Overrides config.")
 @click.option("--include-fp", is_flag=True, help="Include likely false positives in summary table.")
-@click.option("--limit", type=int, default=None, help="Max number of findings to triage (for testing).")
+@click.option("--limit", type=int, default=None, help="Max number of findings to triage (first N).")
+@click.option("--sample", type=int, default=None, help="Randomly sample N findings to triage (instead of all/first N).")
 @click.option("--dry-run", is_flag=True, help="Parse and validate only; do not call triage API.")
 @click.option("--redact-code", is_flag=True, help="Do not send code snippets to the AI model.")
 @click.option(
@@ -111,6 +114,7 @@ def triage(
     context: str | None,
     include_fp: bool,
     limit: int | None,
+    sample: int | None,
     dry_run: bool,
     redact_code: bool,
     gate_threshold: float | None,
@@ -120,6 +124,8 @@ def triage(
     cfg = load_config()
     out_dir = Path(output_dir or cfg.output_dir)
     context = context or cfg.project_context
+    redact_code = redact_code or cfg.redact_code
+    gate_threshold = gate_threshold if gate_threshold is not None else cfg.gate_threshold
 
     try:
         findings = parse_scan_file(input_path, fmt)
@@ -135,7 +141,19 @@ def triage(
         console.print("[green]No findings in scan file.[/]")
         return
 
-    if limit is not None:
+    total_findings = len(findings)
+    if total_findings > 1000:
+        console.print(
+            f"[dim]Large scan ({total_findings} findings). Consider --limit or --sample to reduce cost.[/]"
+        )
+
+    if sample is not None and sample > 0:
+        import random
+        n = min(sample, len(findings))
+        findings = random.sample(findings, n)
+        if verbose:
+            console.print(f"[dim]Sampled {n} finding(s) at random[/]")
+    if limit is not None and limit > 0:
         findings = findings[:limit]
         if verbose:
             console.print(f"[dim]Limited to {limit} finding(s)[/]")
@@ -147,7 +165,7 @@ def triage(
     # Require API key only when we are about to make real triage calls.
     _require_api_key()
 
-    report = TriageReport(source_file=str(input_path), entries=[])
+    report = TriageReport(source_file=str(input_path), prompt_version=PROMPT_VERSION, entries=[])
     out_dir.mkdir(parents=True, exist_ok=True)
 
     with progress_spinner(console) as progress:

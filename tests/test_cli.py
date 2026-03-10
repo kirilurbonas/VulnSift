@@ -93,3 +93,12 @@ def test_triage_limit(sample_sarif_path: Path) -> None:
     )
     assert result.exit_code == 0
     assert "Would triage" in result.output
+
+
+def test_triage_sample_dry_run(sample_sarif_path: Path) -> None:
+    result = runner.invoke(
+        main,
+        ["triage", "--input", str(sample_sarif_path), "--format", "sarif", "--sample", "1", "--dry-run"],
+    )
+    assert result.exit_code == 0
+    assert "Would triage" in result.output

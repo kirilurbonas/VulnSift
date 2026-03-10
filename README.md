@@ -82,7 +82,7 @@ vulnsift triage --input scan.sarif --format auto --export json --output-dir ./ou
 vulnsift triage --input scan.sarif --export md-single   # one remediation.md file
 ```
 
-Use `--dry-run` to parse only (no API calls). Use `--limit N` to triage at most N findings (e.g. for testing). Use `--verbose` for extra logging.
+Use `--dry-run` to parse only (no API calls). Use `--limit N` to triage the first N findings, or `--sample N` to randomly sample N. Use `--redact-code` to avoid sending code snippets to the model. Use `--gate-threshold 7` to exit with code 2 when any non–false-positive finding has risk ≥ 7 (for CI gates). Use `--verbose` for extra logging.
 
 ### Usage: report
 
@@ -108,8 +108,11 @@ vulnsift report --input ./out/triage-report.json
 - **`--output-dir`** — Directory for Markdown/JSON (default: from `vulnsift.yaml` or `./vulnsift-output`).
 - **`--context`** — Project context for risk assessment (overrides config).
 - **`--include-fp`** — Include likely false positives in the summary table.
-- **`--limit N`** — Triage at most N findings (for testing).
+- **`--limit N`** — Triage only the first N findings.
 - **`--dry-run`** — Parse and validate only; do not call the triage API.
+- **`--sample N`** — Randomly sample N findings to triage (good for large scans).
+- **`--redact-code`** — Do not send code snippets to the AI model (privacy/safe mode).
+- **`--gate-threshold FLOAT`** — Exit with code 2 if any non-FP finding has risk ≥ this (CI gate).
 - **`--verbose`** / **`-v`** — Verbose output.
 
 ## Config file
@@ -120,9 +123,17 @@ Optional `vulnsift.yaml` or `.vulnsift.yaml` in the project root:
 project_context: "Python app, internal only"
 output_dir: ./vulnsift-output
 api_key_file: .secrets/anthropic_key
+redact_code: false
+gate_threshold: 7   # optional: fail CI if any non-FP risk >= 7
 ```
 
 CLI options override these values.
+
+## Exit codes
+
+- **0** — Success.
+- **1** — Error (bad input, missing config, API failure).
+- **2** — Gate failed: at least one non–false-positive finding has risk score ≥ `--gate-threshold`.
 
 ## Supported scan formats
 
@@ -163,7 +174,7 @@ Example GitHub Actions job (run after a scanner step that produces a SARIF or JS
 - **No API key?** Use `vulnsift validate` or `vulnsift triage --dry-run` to parse and inspect scans without calling the API.
 - **Cost / rate limits?** Triage calls Claude per finding. Use `--limit N` to cap the number of findings (e.g. `--limit 20` for a quick run).
 - **Unsupported format?** Use `--format sarif|snyk|semgrep|trivy` if auto-detection fails, or open an issue with a sample (redacted).
-- **Large scans?** Run with `--limit` first to validate; then run full triage when ready.
+- **Large scans?** Use `--limit N` or `--sample N` to triage a subset; VulnSift will warn when a scan has >1000 findings.
 
 ## Development
 

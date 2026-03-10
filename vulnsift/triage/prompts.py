@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from vulnsift.models import UnifiedFinding
 
+PROMPT_VERSION = "1.0"
+
 SYSTEM_PROMPT = """You are an expert Application Security engineer performing vulnerability triage.
 Your job is to assess each finding for real-world exploitability and likelihood of false positive.
 
