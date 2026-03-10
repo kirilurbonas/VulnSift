@@ -2,9 +2,20 @@
 
 **From noise to signal** — AI-powered vulnerability triage. Turn SAST/SCA scanner output into clear, actionable remediation.
 
-Enterprise security scanners routinely produce hundreds of findings per run, with a large share being false positives or low-priority noise. That noise creates alert fatigue: developers stop reading reports, and real vulnerabilities get buried.
+Enterprise security scanners routinely produce hundreds of findings per run, with a large share being false positives or low-priority noise. VulnSift ingests scan output (SARIF, Snyk, Semgrep, Trivy), runs Claude-powered triage to score real-world risk, flags likely false positives, and generates Markdown remediation cards developers can act on.
 
-VulnSift ingests scan output (SARIF or Snyk JSON), runs Claude-powered triage to score real-world risk, flags likely false positives, and generates Markdown remediation cards developers can actually act on. It is a CLI reference implementation that follows the VulnSift PRD and demonstrates production-grade AI triage patterns.
+**For:** Security engineers, AppSec teams, and developers who run SAST/SCA and want to prioritize and remediate without drowning in noise.
+
+## Try it in 30 seconds (no API key needed)
+
+```bash
+pip install vulnsift
+cd /path/to/VulnSift   # or clone the repo
+vulnsift validate --input fixtures/sample.sarif.json
+vulnsift triage --input fixtures/sample.sarif.json --dry-run
+```
+
+Use `--dry-run` and `validate` anytime to parse and inspect; only `triage` (real AI calls) needs `ANTHROPIC_API_KEY`.
 
 ## Key features
 
@@ -34,10 +45,11 @@ pip install .
 
 ## Quick start
 
-Set your API key (or use `.env` with `ANTHROPIC_API_KEY`):
+For real triage (AI calls), set your API key. Optionally use a `.env` file in the project root — VulnSift auto-loads it if `python-dotenv` is installed (`pip install vulnsift[dotenv]` or `pip install python-dotenv`):
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
+# Or: add ANTHROPIC_API_KEY=sk-ant-... to .env and install vulnsift[dotenv]
 ```
 
 ### Usage overview
@@ -146,6 +158,13 @@ Example GitHub Actions job (run after a scanner step that produces a SARIF or JS
     vulnsift triage --input scan-results.sarif --format auto --export json --output-dir ./vulnsift-out
 ```
 
+## FAQ / Gotchas
+
+- **No API key?** Use `vulnsift validate` or `vulnsift triage --dry-run` to parse and inspect scans without calling the API.
+- **Cost / rate limits?** Triage calls Claude per finding. Use `--limit N` to cap the number of findings (e.g. `--limit 20` for a quick run).
+- **Unsupported format?** Use `--format sarif|snyk|semgrep|trivy` if auto-detection fails, or open an issue with a sample (redacted).
+- **Large scans?** Run with `--limit` first to validate; then run full triage when ready.
+
 ## Development
 
 ```bash
@@ -156,9 +175,7 @@ pytest tests/ -v
 
 For more details (including contribution guidelines), see `CONTRIBUTING.md`.
 
-## Architecture / PRD
-
-This implementation follows the VulnSift Product Requirements Document (PRD): a Claude-powered CLI that ingests scanner output (SARIF/Snyk), normalizes findings, runs AI triage with contextual risk scoring, and produces developer-ready remediation guidance. You can browse the source and CI setup at [`https://github.com/kirilurbonas/VulnSift`](https://github.com/kirilurbonas/VulnSift).
+**Feedback:** [Open an issue](https://github.com/kirilurbonas/VulnSift/issues) — we’re especially interested in how AppSec and dev teams use VulnSift in real pipelines.
 
 ## License
 

@@ -2,7 +2,15 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
+
+# Optional: load .env so ANTHROPIC_API_KEY can be set without exporting
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 import click
 from rich.console import Console
@@ -29,13 +37,32 @@ def _err_with_hint(msg: str, hint: str | None = None) -> None:
     raise SystemExit(1)
 
 
+def _require_api_key() -> None:
+    """
+    Ensure ANTHROPIC_API_KEY is present before making triage API calls.
+    Dry-run and validate flows do not require it.
+    """
+    if not os.getenv("ANTHROPIC_API_KEY"):
+        _err_with_hint(
+            "ANTHROPIC_API_KEY is not set.",
+            "Set ANTHROPIC_API_KEY in your environment (or .env) before running `vulnsift triage`.",
+        )
+
+
 @click.group()
 @click.version_option(version="0.1.0", prog_name="vulnsift")
 def main() -> None:
     """VulnSift: AI-powered vulnerability triage from scanner output to actionable remediation."""
 
 
-@main.command()
+@main.command(
+    epilog="""
+Examples:
+  vulnsift triage --input scan.sarif --export json
+  vulnsift triage --input scan.sarif --dry-run
+  vulnsift triage --input scan.sarif --limit 10 --output-dir ./out
+""",
+)
 @click.option(
     "--input",
     "input_path",
@@ -107,6 +134,9 @@ def triage(
         console.print(f"[green]Dry run:[/] Would triage [bold]{len(findings)}[/] finding(s).")
         return
 
+    # Require API key only when we are about to make real triage calls.
+    _require_api_key()
+
     report = TriageReport(source_file=str(input_path), entries=[])
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -152,7 +182,12 @@ def triage(
         console.print(f"[green]Exported single remediation file to {single_path}[/]")
 
 
-@main.command()
+@main.command(
+    epilog="""
+Examples:
+  vulnsift report --input ./vulnsift-output/triage-report.json
+""",
+)
 @click.option("--input", "input_path", required=True, type=click.Path(exists=True), help="Triage report JSON file.")
 def report(input_path: str) -> None:
     """Summarize a previously exported triage report (JSON)."""
@@ -166,7 +201,13 @@ def report(input_path: str) -> None:
     render_summary_table(report_obj, include_false_positives=True, console=console)
 
 
-@main.command()
+@main.command(
+    epilog="""
+Examples:
+  vulnsift validate --input scan.sarif
+  vulnsift validate --input fixtures/sample.sarif.json --format auto
+""",
+)
 @click.option("--input", "input_path", required=True, type=click.Path(exists=True), help="Scan file to validate.")
 @click.option(
     "--format",
