@@ -79,8 +79,13 @@ TOOL_SCHEMA = {
 def build_user_prompt(
     finding: UnifiedFinding,
     project_context: str | None = None,
+    *,
+    redact_code: bool = False,
 ) -> str:
-    """Build the user message for a single finding."""
+    """Build the user message for a single finding.
+
+    When redact_code is True, do not include raw code snippets in the prompt.
+    """
     parts = [
         "## Finding",
         f"**Rule/ID:** {finding.rule_id}",
@@ -99,7 +104,10 @@ def build_user_prompt(
         if finding.location.start_line is not None:
             parts.append(f"**Line:** {finding.location.start_line}")
         if finding.location.snippet:
-            parts.append(f"**Snippet:**\n```\n{finding.location.snippet}\n```")
+            if redact_code:
+                parts.append("**Snippet:** (redacted; code not sent to model)")
+            else:
+                parts.append(f"**Snippet:**\n```\n{finding.location.snippet}\n```")
     if project_context:
         parts.append("")
         parts.append("## Project context (for risk assessment)")

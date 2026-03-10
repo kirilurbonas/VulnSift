@@ -35,6 +35,13 @@ def test_build_user_prompt(sample_finding: UnifiedFinding) -> None:
     assert "internal only" in with_context
 
 
+def test_build_user_prompt_redact(sample_finding: UnifiedFinding) -> None:
+    sample_finding.location.snippet = "print('secret')"  # type: ignore[assignment]
+    text = build_user_prompt(sample_finding, redact_code=True)
+    assert "redacted" in text.lower()
+    assert "print('secret')" not in text
+
+
 def test_parse_tool_use() -> None:
     class Block:
         type = "tool_use"

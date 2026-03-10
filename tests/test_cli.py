@@ -68,6 +68,24 @@ def test_triage_dry_run(sample_sarif_path: Path) -> None:
     assert "Would triage" in result.output
 
 
+def test_triage_gate_threshold_dry_run(sample_sarif_path: Path) -> None:
+    # In dry-run mode, gate-threshold should not cause a non-zero exit; no triage is performed.
+    result = runner.invoke(
+        main,
+        [
+            "triage",
+            "--input",
+            str(sample_sarif_path),
+            "--format",
+            "sarif",
+            "--dry-run",
+            "--gate-threshold",
+            "1",
+        ],
+    )
+    assert result.exit_code == 0
+
+
 def test_triage_limit(sample_sarif_path: Path) -> None:
     result = runner.invoke(
         main,

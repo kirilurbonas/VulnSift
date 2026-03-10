@@ -29,10 +29,13 @@ def triage_finding(
     *,
     api_key: str | None = None,
     model: str = DEFAULT_MODEL,
+    redact_code: bool = False,
 ) -> tuple[TriageResult, RemediationCard]:
     """
     Send one finding to Claude for triage. Returns (TriageResult, RemediationCard).
     Raises on API or parsing errors after retries.
+
+    When redact_code is True, code snippets from the finding are not included in the prompt.
     """
     key = api_key or os.environ.get("ANTHROPIC_API_KEY")
     if not key:
@@ -48,7 +51,7 @@ def triage_finding(
         }
     ]
 
-    user_content = build_user_prompt(finding, project_context)
+    user_content = build_user_prompt(finding, project_context, redact_code=redact_code)
     messages: list[MessageParam] = [{"role": "user", "content": user_content}]
 
     client = Anthropic(api_key=key)

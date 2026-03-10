@@ -61,6 +61,7 @@ Examples:
   vulnsift triage --input scan.sarif --export json
   vulnsift triage --input scan.sarif --dry-run
   vulnsift triage --input scan.sarif --limit 10 --output-dir ./out
+  vulnsift triage --input scan.sarif --redact-code --gate-threshold 7
 """,
 )
 @click.option(
@@ -94,6 +95,13 @@ Examples:
 @click.option("--include-fp", is_flag=True, help="Include likely false positives in summary table.")
 @click.option("--limit", type=int, default=None, help="Max number of findings to triage (for testing).")
 @click.option("--dry-run", is_flag=True, help="Parse and validate only; do not call triage API.")
+@click.option("--redact-code", is_flag=True, help="Do not send code snippets to the AI model.")
+@click.option(
+    "--gate-threshold",
+    type=float,
+    default=None,
+    help="If set, exit with code 2 when any non-FP finding has risk >= threshold.",
+)
 @click.option("--verbose", "-v", is_flag=True, help="Verbose output.")
 def triage(
     input_path: str,
@@ -104,6 +112,8 @@ def triage(
     include_fp: bool,
     limit: int | None,
     dry_run: bool,
+    redact_code: bool,
+    gate_threshold: float | None,
     verbose: bool,
 ) -> None:
     """Triage scan findings with Claude and output summary + remediation cards."""
@@ -144,7 +154,7 @@ def triage(
         task = progress.add_task("Triaging findings...", total=len(findings)) if progress else None
         for f in findings:
             try:
-                triage_result, remediation = triage_finding(f, project_context=context)
+                triage_result, remediation = triage_finding(f, project_context=context, redact_code=redact_code)
                 report.entries.append(
                     TriageReportEntry(finding=f, triage=triage_result, remediation=remediation)
                 )
@@ -171,6 +181,18 @@ def triage(
     written_cards = render_remediation_cards(report.entries, out_dir, only_actionable=True)
     if written_cards:
         console.print(f"[green]Wrote {len(written_cards)} remediation card(s) to {out_dir}[/]")
+
+    # If gate_threshold is set, treat high-risk findings as a CI gate.
+    if gate_threshold is not None:
+        max_risk = max(
+            (e.triage.risk_score for e in report.entries if not e.triage.is_likely_false_positive),
+            default=0,
+        )
+        if max_risk >= gate_threshold:
+            console.print(
+                f"[red]Gate failed:[/] highest non-FP risk score {max_risk} >= threshold {gate_threshold}."
+            )
+            raise SystemExit(2)
 
     if export_format == "json":
         json_path = out_dir / "triage-report.json"
