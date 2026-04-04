@@ -1,0 +1,188 @@
+{
+  "schema_version": "1.0",
+  "prompt_version": "1.0",
+  "source_file": "fixtures/sample.sarif.json",
+  "entries": [
+    {
+      "finding": {
+        "id": "finding-1",
+        "rule_id": "sql-injection",
+        "title": "SQL Injection in user query handler",
+        "message": "User input is concatenated into SQL query without parameterisation.",
+        "severity": "high",
+        "description": "String concatenation used to build SQL query with user-supplied input.",
+        "cve": null,
+        "cwe": "CWE-89",
+        "location": {
+          "file_path": "src/db/queries.py",
+          "start_line": 42,
+          "end_line": 45,
+          "snippet": "query = \"SELECT * FROM users WHERE id = \" + user_id",
+          "region": null
+        },
+        "raw": {},
+        "source_format": "semgrep"
+      },
+      "triage": {
+        "risk_score": 9,
+        "is_likely_false_positive": false,
+        "reasoning": "User input flows directly into SQL query. Public-facing endpoint.",
+        "exploitability_notes": "Directly exploitable via HTTP request parameter."
+      },
+      "remediation": {
+        "title": "Use parameterised queries in user query handler",
+        "business_impact": "Attacker can read, modify, or delete any data in the database.",
+        "steps": [
+          "Replace string concatenation with parameterised query.",
+          "Use cursor.execute('SELECT * FROM users WHERE id = ?', (user_id,)).",
+          "Add input validation for user_id parameter."
+        ],
+        "code_snippet": "cursor.execute('SELECT * FROM users WHERE id = ?', (user_id,))",
+        "reference_links": ["https://cwe.mitre.org/data/definitions/89.html"]
+      }
+    },
+    {
+      "finding": {
+        "id": "finding-2",
+        "rule_id": "xss-reflected",
+        "title": "Reflected XSS in search endpoint",
+        "message": "User input is reflected in HTML response without escaping.",
+        "severity": "high",
+        "description": "Search query parameter is rendered directly in the HTML page.",
+        "cve": null,
+        "cwe": "CWE-79",
+        "location": {
+          "file_path": "src/web/search.py",
+          "start_line": 18,
+          "end_line": 18,
+          "snippet": "return f\"<h1>Results for {query}</h1>\"",
+          "region": null
+        },
+        "raw": {},
+        "source_format": "semgrep"
+      },
+      "triage": {
+        "risk_score": 7,
+        "is_likely_false_positive": false,
+        "reasoning": "Direct reflection of user input in HTML without sanitisation.",
+        "exploitability_notes": "Exploitable via crafted URL. Requires user interaction."
+      },
+      "remediation": {
+        "title": "Escape user input in search results page",
+        "business_impact": "Attacker can execute JavaScript in victim's browser, steal sessions.",
+        "steps": [
+          "Import html.escape from the standard library.",
+          "Escape query before rendering: html.escape(query).",
+          "Consider using a template engine with auto-escaping."
+        ],
+        "code_snippet": "from html import escape\nreturn f\"<h1>Results for {escape(query)}</h1>\"",
+        "reference_links": ["https://cwe.mitre.org/data/definitions/79.html"]
+      }
+    },
+    {
+      "finding": {
+        "id": "finding-3",
+        "rule_id": "CVE-2023-12345",
+        "title": "Prototype pollution in lodash < 4.17.21",
+        "message": "lodash versions before 4.17.21 are vulnerable to prototype pollution.",
+        "severity": "medium",
+        "description": "Prototype pollution vulnerability in lodash merge/defaults functions.",
+        "cve": "CVE-2023-12345",
+        "cwe": "CWE-1321",
+        "location": {
+          "file_path": "package.json",
+          "start_line": 15,
+          "end_line": 15,
+          "snippet": "\"lodash\": \"^4.17.19\"",
+          "region": null
+        },
+        "raw": {},
+        "source_format": "snyk"
+      },
+      "triage": {
+        "risk_score": 5,
+        "is_likely_false_positive": false,
+        "reasoning": "Known CVE but exploitation requires specific usage of merge/defaults.",
+        "exploitability_notes": "Depends on how lodash is used. Check for merge with user input."
+      },
+      "remediation": {
+        "title": "Upgrade lodash to 4.17.21",
+        "business_impact": "Potential remote code execution if attacker controls merge input.",
+        "steps": [
+          "Run: npm install lodash@4.17.21",
+          "Verify no breaking changes in lodash changelog.",
+          "Run test suite to confirm."
+        ],
+        "code_snippet": null,
+        "reference_links": ["https://nvd.nist.gov/vuln/detail/CVE-2023-12345"]
+      }
+    },
+    {
+      "finding": {
+        "id": "finding-4",
+        "rule_id": "unused-import-check",
+        "title": "Unused import detected",
+        "message": "Module 'os' is imported but not used.",
+        "severity": "low",
+        "description": "Static analysis detected an unused import statement.",
+        "cve": null,
+        "cwe": null,
+        "location": {
+          "file_path": "src/utils/helpers.py",
+          "start_line": 1,
+          "end_line": 1,
+          "snippet": "import os",
+          "region": null
+        },
+        "raw": {},
+        "source_format": "semgrep"
+      },
+      "triage": {
+        "risk_score": 0,
+        "is_likely_false_positive": true,
+        "reasoning": "Unused import is a code quality issue, not a security vulnerability.",
+        "exploitability_notes": "No security impact."
+      },
+      "remediation": null
+    },
+    {
+      "finding": {
+        "id": "finding-5",
+        "rule_id": "hardcoded-secret",
+        "title": "Hardcoded API key in configuration",
+        "message": "API key is hardcoded in source file.",
+        "severity": "high",
+        "description": "A secret value appears to be hardcoded in the source code.",
+        "cve": null,
+        "cwe": "CWE-798",
+        "location": {
+          "file_path": "src/config/settings.py",
+          "start_line": 8,
+          "end_line": 8,
+          "snippet": "API_KEY = \"sk-1234567890abcdef\"",
+          "region": null
+        },
+        "raw": {},
+        "source_format": "semgrep"
+      },
+      "triage": {
+        "risk_score": 8,
+        "is_likely_false_positive": false,
+        "reasoning": "Hardcoded secret in source code. If repo is public, key is compromised.",
+        "exploitability_notes": "Immediately exploitable if repository is public or shared."
+      },
+      "remediation": {
+        "title": "Move API key to environment variable",
+        "business_impact": "Leaked credentials allow unauthorised access to external service.",
+        "steps": [
+          "Remove the hardcoded key from source code.",
+          "Use os.environ.get('API_KEY') to read from environment.",
+          "Add API_KEY to .env.example with a placeholder value.",
+          "Rotate the compromised key immediately."
+        ],
+        "code_snippet": "import os\nAPI_KEY = os.environ.get('API_KEY', '')",
+        "reference_links": ["https://cwe.mitre.org/data/definitions/798.html"]
+      }
+    }
+  ]
+}

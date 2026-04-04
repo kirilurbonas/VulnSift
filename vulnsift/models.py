@@ -67,3 +67,22 @@ class TriageReport(BaseModel):
     prompt_version: str = "1.0"
     entries: list[TriageReportEntry] = Field(default_factory=list)
     source_file: str = ""
+
+
+class AutofixResult(BaseModel):
+    """Result of an auto-fix attempt for a single finding."""
+
+    finding_id: str = ""
+    file_path: str = ""
+    original_snippet: str = ""
+    patched_snippet: str = ""
+    explanation: str = ""
+    confidence: int = Field(default=0, ge=0, le=10)
+    applied: bool = False
+
+
+class AutofixReport(BaseModel):
+    """Collection of auto-fix results from a triage report."""
+
+    source_triage: str = ""
+    results: list[AutofixResult] = Field(default_factory=list)

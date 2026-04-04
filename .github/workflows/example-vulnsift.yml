@@ -1,0 +1,37 @@
+# Example: Run VulnSift triage on PRs and post a risk summary comment.
+# Copy this workflow into your repository and adjust the scan step.
+
+name: VulnSift PR Triage
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  vulnsift:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+    steps:
+      # 1. Check out the code
+      - uses: actions/checkout@v4
+
+      # 2. Run your scanner (example: Semgrep)
+      - name: Run Semgrep
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: auto
+          generateSarif: true
+      # Produces: semgrep.sarif
+
+      # 3. Run VulnSift triage and post PR comment
+      - name: VulnSift Triage
+        uses: kirilurbonas/VulnSift@main
+        with:
+          scan-file: semgrep.sarif
+          format: sarif
+          threshold: "7"
+          context: "Python web application, public-facing API"
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          comment: "true"

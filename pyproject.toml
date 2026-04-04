@@ -18,9 +18,11 @@ pydantic = "^2.0"
 anthropic = "^0.39"
 pyyaml = "^6.0"
 python-dotenv = { version = "^1.0", optional = true }
+flask = { version = "^3.0", optional = true }
 
 [tool.poetry.extras]
 dotenv = ["python-dotenv"]
+dashboard = ["flask"]
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.0"

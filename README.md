@@ -1,10 +1,10 @@
 # VulnSift
 
-**From noise to signal** — AI-powered vulnerability triage. Turn SAST/SCA scanner output into clear, actionable remediation.
+**AI-powered vulnerability triage and remediation** — from scanner noise to fixed code.
 
-Enterprise security scanners routinely produce hundreds of findings per run, with a large share being false positives or low-priority noise. VulnSift ingests scan output (SARIF, Snyk, Semgrep, Trivy), runs Claude-powered triage to score real-world risk, flags likely false positives, and generates Markdown remediation cards developers can act on.
+VulnSift ingests SAST/SCA scanner output (SARIF, Snyk, Semgrep, Trivy), uses Claude to score real-world risk, flags false positives, generates remediation cards, and **automatically creates fix PRs** for high-risk findings. Run it as a **GitHub Action** that posts risk summaries on every PR, or explore trends in the built-in **web dashboard**.
 
-**For:** Security engineers, AppSec teams, and developers who run SAST/SCA and want to prioritize and remediate without drowning in noise.
+**For:** Security engineers, AppSec teams, and developers who want to go from scan results to merged fixes — not just reports.
 
 ## Try it in 30 seconds (no API key needed)
 
@@ -19,10 +19,12 @@ Use `--dry-run` and `validate` anytime to parse and inspect; only `triage` (real
 
 ## Key features
 
-- **Multi-scanner ingestion**: Read SARIF 2.1.0, Snyk, Semgrep, and Trivy JSON and normalize them into a single `UnifiedFinding` model. Use `--format auto` to detect format from file content.
-- **AI triage with risk scoring**: Use Claude to assess exploitability and business context, producing a VulnSift Risk Score (0–10) and a likely-false-positive flag.
-- **Developer-friendly remediation cards**: Generate Markdown cards with business impact, step-by-step fixes, code snippets, and references.
-- **Rich CLI experience**: Colour-coded summary table, optional JSON export for full audit, and fixtures for trying the tool without a real scan.
+- **Multi-scanner ingestion**: SARIF 2.1.0, Snyk, Semgrep, and Trivy JSON normalized into a single `UnifiedFinding` model.
+- **AI triage with risk scoring**: Claude assesses exploitability and business context, producing a 0–10 risk score and false-positive flag.
+- **Auto-fix agent**: Generates code patches for high-risk findings and opens fix PRs automatically.
+- **GitHub Action**: First-class CI gate that posts a risk summary comment on every PR.
+- **Web dashboard**: Scan history, risk trends, recurring vulnerabilities, and remediation progress.
+- **Developer-friendly remediation cards**: Markdown cards with business impact, step-by-step fixes, and code snippets.
 
 ## Requirements
 
@@ -99,6 +101,10 @@ vulnsift report --input ./out/triage-report.json
 | `triage`  | Parse a scan file, triage each finding with Claude, print a colour summary table, and write Markdown remediation cards. Use `--export json` to save the full report. |
 | `validate`| Parse and validate a scan file (SARIF, Snyk, Semgrep, Trivy; use `--format auto` to detect) without calling the API. |
 | `report`  | Print a summary table from a previously exported `triage-report.json`. |
+| `autofix` | Generate AI-powered code patches for high-risk findings. Use `--dry-run` to preview diffs, `--open-pr` to create GitHub PRs. |
+| `github-comment` | Render a GitHub PR comment from a triage report JSON. Used by the GitHub Action. |
+| `store`   | Store a triage report in the dashboard database for trend tracking. |
+| `dashboard` | Launch the web dashboard (requires `pip install vulnsift[dashboard]`). |
 
 ## Options (triage)
 
@@ -157,9 +163,87 @@ Try the CLI without a real scan:
 vulnsift validate --input fixtures/sample.sarif.json --format auto
 ```
 
-## Running VulnSift in CI
+## GitHub Action
 
-Example GitHub Actions job (run after a scanner step that produces a SARIF or JSON file):
+VulnSift ships as a reusable GitHub Action. Add it to any PR workflow to automatically triage scanner findings and post a risk summary comment:
+
+```yaml
+- name: VulnSift Triage
+  uses: kirilurbonas/VulnSift@main
+  with:
+    scan-file: semgrep.sarif
+    format: sarif
+    threshold: "7"
+    context: "Python web app, public-facing"
+    anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+    comment: "true"
+```
+
+The action will:
+1. Run AI triage on all findings
+2. Post/update a PR comment with a risk summary table and recommended actions
+3. Fail the step if any non-FP finding scores >= the threshold (CI gate)
+
+See `.github/workflows/example-vulnsift.yml` for a complete example.
+
+### Action inputs
+
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `scan-file` | Yes | — | Path to scanner output file |
+| `format` | No | `auto` | Scanner format (sarif, snyk, semgrep, trivy, auto) |
+| `threshold` | No | — | Gate threshold (0-10). Fail if any finding >= this |
+| `context` | No | — | Project context for risk assessment |
+| `redact-code` | No | `false` | Don't send code snippets to the model |
+| `anthropic-api-key` | Yes | — | Anthropic API key |
+| `github-token` | No | `github.token` | Token for posting PR comments |
+| `comment` | No | `true` | Post/update a PR comment |
+
+## Auto-fix agent
+
+VulnSift can automatically generate code patches for high-risk findings:
+
+```bash
+# Preview fixes without modifying files
+vulnsift autofix --input triage-report.json --dry-run
+
+# Apply patches and create GitHub PRs
+vulnsift autofix --input triage-report.json --open-pr --min-risk 8
+```
+
+The auto-fix agent:
+1. Reads each high-risk finding from a triage report
+2. Loads the affected source file
+3. Uses Claude to generate a minimal, safe patch
+4. Validates the patch (syntax check for Python, brace balance for JS/TS/etc.)
+5. Optionally creates a branch and opens a PR per fix (requires `gh` CLI)
+
+Options: `--dry-run`, `--min-risk N` (default 7), `--repo-root .`, `--open-pr`.
+
+## Web dashboard
+
+Track scan results over time with the built-in dashboard:
+
+```bash
+pip install vulnsift[dashboard]
+
+# Store reports after each triage
+vulnsift triage --input scan.sarif --export json
+vulnsift store --input vulnsift-output/triage-report.json
+
+# Launch dashboard
+vulnsift dashboard --port 8080
+```
+
+The dashboard shows:
+- **Scan history** — all stored scans with findings counts and risk scores
+- **Risk trends** — max and average risk score over time
+- **Top recurring vulnerabilities** — most frequent rules across scans
+- **Severity breakdown** — critical / medium / low / false positive distribution
+
+## Running VulnSift in CI (manual)
+
+For CI setups without the GitHub Action, run VulnSift directly:
 
 ```yaml
 - name: VulnSift triage

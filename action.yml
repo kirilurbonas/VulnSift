@@ -1,0 +1,165 @@
+name: "VulnSift Triage"
+description: "AI-powered vulnerability triage: scan, score, and comment on PRs with risk summaries."
+branding:
+  icon: shield
+  color: purple
+
+inputs:
+  scan-file:
+    description: "Path to the scanner output file (SARIF, Snyk, Semgrep, or Trivy JSON)."
+    required: true
+  format:
+    description: "Scanner format: auto, sarif, snyk, semgrep, trivy."
+    required: false
+    default: "auto"
+  threshold:
+    description: "Gate threshold (0-10). Fail the step if any non-FP finding scores >= this value."
+    required: false
+    default: ""
+  context:
+    description: "Project context for risk assessment (e.g. 'internal Python API, no public exposure')."
+    required: false
+    default: ""
+  redact-code:
+    description: "Set to 'true' to avoid sending code snippets to the AI model."
+    required: false
+    default: "false"
+  anthropic-api-key:
+    description: "Anthropic API key for Claude triage calls."
+    required: true
+  github-token:
+    description: "GitHub token for posting PR comments."
+    required: false
+    default: ${{ github.token }}
+  comment:
+    description: "Set to 'true' to post/update a PR comment with the triage summary."
+    required: false
+    default: "true"
+
+outputs:
+  report-json:
+    description: "Path to the generated triage-report.json file."
+    value: ${{ steps.triage.outputs.report_json }}
+  max-risk:
+    description: "Highest non-FP risk score found."
+    value: ${{ steps.triage.outputs.max_risk }}
+  gate-result:
+    description: "'passed' or 'failed' (empty if no threshold set)."
+    value: ${{ steps.triage.outputs.gate_result }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - name: Install VulnSift
+      shell: bash
+      run: pip install vulnsift
+
+    - name: Run VulnSift triage
+      id: triage
+      shell: bash
+      env:
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+      run: |
+        set +e
+        ARGS="--input '${{ inputs.scan-file }}' --format ${{ inputs.format }} --export json"
+
+        if [ -n "${{ inputs.context }}" ]; then
+          ARGS="$ARGS --context '${{ inputs.context }}'"
+        fi
+
+        if [ "${{ inputs.redact-code }}" = "true" ]; then
+          ARGS="$ARGS --redact-code"
+        fi
+
+        if [ -n "${{ inputs.threshold }}" ]; then
+          ARGS="$ARGS --gate-threshold ${{ inputs.threshold }}"
+        fi
+
+        eval vulnsift triage $ARGS
+        EXIT_CODE=$?
+
+        echo "report_json=vulnsift-output/triage-report.json" >> "$GITHUB_OUTPUT"
+
+        if [ $EXIT_CODE -eq 2 ]; then
+          echo "gate_result=failed" >> "$GITHUB_OUTPUT"
+        elif [ $EXIT_CODE -eq 0 ]; then
+          echo "gate_result=passed" >> "$GITHUB_OUTPUT"
+        else
+          echo "::error::VulnSift triage failed with exit code $EXIT_CODE"
+          exit $EXIT_CODE
+        fi
+
+        # Extract max risk from report
+        if [ -f "vulnsift-output/triage-report.json" ]; then
+          MAX_RISK=$(python3 -c "
+        import json, sys
+        r = json.load(open('vulnsift-output/triage-report.json'))
+        scores = [e['triage']['risk_score'] for e in r.get('entries', []) if not e['triage'].get('is_likely_false_positive')]
+        print(max(scores) if scores else 0)
+        ")
+          echo "max_risk=$MAX_RISK" >> "$GITHUB_OUTPUT"
+        fi
+
+        # Save exit code for later — don't fail yet if we need to post a comment
+        echo "triage_exit_code=$EXIT_CODE" >> "$GITHUB_ENV"
+
+    - name: Generate PR comment
+      if: inputs.comment == 'true' && github.event_name == 'pull_request'
+      id: comment
+      shell: bash
+      run: |
+        THRESHOLD_ARG=""
+        if [ -n "${{ inputs.threshold }}" ]; then
+          THRESHOLD_ARG="--threshold ${{ inputs.threshold }}"
+        fi
+
+        vulnsift github-comment \
+          --input vulnsift-output/triage-report.json \
+          $THRESHOLD_ARG \
+          --output vulnsift-output/pr-comment.md
+
+    - name: Post or update PR comment
+      if: inputs.comment == 'true' && github.event_name == 'pull_request'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        PR_NUMBER="${{ github.event.pull_request.number }}"
+        COMMENT_BODY=$(cat vulnsift-output/pr-comment.md)
+        MARKER="<!-- vulnsift-triage -->"
+
+        # Find existing VulnSift comment
+        EXISTING_COMMENT_ID=$(gh api \
+          "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+          --jq ".[] | select(.body | startswith(\"${MARKER}\")) | .id" \
+          2>/dev/null | head -1)
+
+        if [ -n "$EXISTING_COMMENT_ID" ]; then
+          gh api \
+            --method PATCH \
+            "repos/${{ github.repository }}/issues/comments/${EXISTING_COMMENT_ID}" \
+            -f body="$COMMENT_BODY"
+          echo "Updated existing comment $EXISTING_COMMENT_ID"
+        else
+          gh api \
+            --method POST \
+            "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+            -f body="$COMMENT_BODY"
+          echo "Created new comment"
+        fi
+
+    - name: Apply gate result
+      if: always()
+      shell: bash
+      run: |
+        if [ "${{ env.triage_exit_code }}" = "2" ]; then
+          echo "::error::VulnSift gate FAILED: risk score >= threshold ${{ inputs.threshold }}"
+          exit 2
+        elif [ "${{ env.triage_exit_code }}" != "0" ] && [ "${{ env.triage_exit_code }}" != "" ]; then
+          exit ${{ env.triage_exit_code }}
+        fi
