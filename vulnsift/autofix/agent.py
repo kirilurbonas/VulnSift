@@ -128,6 +128,7 @@ def autofix_report(
     *,
     dry_run: bool = False,
     min_risk: float = 7.0,
+    max_fixes: int | None = None,
     api_key: str | None = None,
     model: str = DEFAULT_MODEL,
 ) -> list[AutofixResult]:
@@ -137,6 +138,8 @@ def autofix_report(
     Returns a list of AutofixResult objects (one per eligible finding).
     """
     eligible = _filter_eligible(report.entries, min_risk)
+    if max_fixes is not None and max_fixes > 0:
+        eligible = eligible[:max_fixes]
     results: list[AutofixResult] = []
 
     for entry in eligible:

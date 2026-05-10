@@ -6,6 +6,9 @@ import sqlite3
 from pathlib import Path
 
 from vulnsift.dashboard.db import (
+    get_latest_hotspots,
+    get_latest_priorities,
+    get_overview,
     get_remediation_progress,
     get_risk_trends,
     get_scan_history,
@@ -44,6 +47,10 @@ def create_app(db_path: Path | str | None = None) -> Flask:
         limit = request.args.get("limit", 50, type=int)
         return jsonify(get_scan_history(get_conn(), limit=limit))
 
+    @app.route("/api/overview")
+    def api_overview():
+        return jsonify(get_overview(get_conn()))
+
     @app.route("/api/trends")
     def api_trends():
         last_n = request.args.get("last_n", 20, type=int)
@@ -53,6 +60,16 @@ def create_app(db_path: Path | str | None = None) -> Flask:
     def api_recurring():
         limit = request.args.get("limit", 10, type=int)
         return jsonify(get_top_recurring(get_conn(), limit=limit))
+
+    @app.route("/api/hotspots")
+    def api_hotspots():
+        limit = request.args.get("limit", 8, type=int)
+        return jsonify(get_latest_hotspots(get_conn(), limit=limit))
+
+    @app.route("/api/priorities")
+    def api_priorities():
+        limit = request.args.get("limit", 8, type=int)
+        return jsonify(get_latest_priorities(get_conn(), limit=limit))
 
     @app.route("/api/progress")
     def api_progress():

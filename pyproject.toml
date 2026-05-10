@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "vulnsift"
-version = "0.1.0"
+version = "0.2.0"
 description = "AI-powered vulnerability triage: turn scanner noise into actionable remediation."
 readme = "README.md"
 authors = ["Kiril Urbonas"]

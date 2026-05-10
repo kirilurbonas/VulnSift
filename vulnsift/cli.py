@@ -15,12 +15,18 @@ except ImportError:
 import click
 from rich.console import Console
 
-from vulnsift.config import load_config
+from vulnsift import __version__
+from vulnsift.analytics import compare_reports
+from vulnsift.config import VulnSiftConfig, load_config, resolve_anthropic_api_key
 from vulnsift.models import TriageReport, TriageReportEntry, TriageResult
 from vulnsift.output import (
     export_report_json,
+    render_backlog,
+    render_comparison_summary,
+    render_html_report,
     render_remediation_cards,
     render_remediation_cards_single,
+    render_report_insights,
     render_summary_table,
 )
 from vulnsift.output.console import progress_spinner
@@ -38,20 +44,37 @@ def _err_with_hint(msg: str, hint: str | None = None) -> None:
     raise SystemExit(1)
 
 
-def _require_api_key() -> None:
+def _require_api_key(cfg: VulnSiftConfig | None = None) -> None:
     """
-    Ensure ANTHROPIC_API_KEY is present before making triage API calls.
-    Dry-run and validate flows do not require it.
+    Ensure ANTHROPIC_API_KEY is available (env or api_key_file in config) before API calls.
     """
-    if not os.getenv("ANTHROPIC_API_KEY"):
+    cfg = cfg or load_config()
+    key = resolve_anthropic_api_key(cfg)
+    if not key:
         _err_with_hint(
-            "ANTHROPIC_API_KEY is not set.",
-            "Set ANTHROPIC_API_KEY in your environment (or .env) before running `vulnsift triage`.",
+            "ANTHROPIC_API_KEY is not set and api_key_file could not be read.",
+            "Set ANTHROPIC_API_KEY, add it to .env, or set api_key_file in vulnsift.yaml to a file containing the key.",
         )
+    os.environ["ANTHROPIC_API_KEY"] = key
 
 
-@click.group()
-@click.version_option(version="0.1.0", prog_name="vulnsift")
+def _load_triage_report(path_like: str) -> TriageReport:
+    path = Path(path_like)
+    if path.suffix.lower() != ".json":
+        _err_with_hint("Expected a JSON file (e.g. triage-report.json).")
+    try:
+        return TriageReport.model_validate_json(path.read_text(encoding="utf-8"))
+    except Exception as e:
+        _err_with_hint(str(e), "Tip: generate with `vulnsift triage --input <scan> --export json`.")
+    raise AssertionError("unreachable")
+
+
+@click.group(
+    epilog="""
+Exit codes:  0 = success,  1 = error,  2 = triage gate failed (--gate-threshold).
+""",
+)
+@click.version_option(version=__version__, prog_name="vulnsift")
 def main() -> None:
     """VulnSift: AI-powered vulnerability triage from scanner output to actionable remediation."""
 
@@ -97,6 +120,14 @@ Examples:
 @click.option("--include-fp", is_flag=True, help="Include likely false positives in summary table.")
 @click.option("--limit", type=int, default=None, help="Max number of findings to triage (first N).")
 @click.option("--sample", type=int, default=None, help="Randomly sample N findings to triage (instead of all/first N).")
+@click.option("--seed", type=int, default=None, help="Random seed for --sample (reproducible CI runs).")
+@click.option(
+    "--cache",
+    "cache_path",
+    type=click.Path(),
+    default=None,
+    help="JSON cache file to reuse triage results for unchanged findings (invalidated when prompt_version changes).",
+)
 @click.option("--dry-run", is_flag=True, help="Parse and validate only; do not call triage API.")
 @click.option("--redact-code", is_flag=True, help="Do not send code snippets to the AI model.")
 @click.option(
@@ -115,6 +146,8 @@ def triage(
     include_fp: bool,
     limit: int | None,
     sample: int | None,
+    seed: int | None,
+    cache_path: str | None,
     dry_run: bool,
     redact_code: bool,
     gate_threshold: float | None,
@@ -149,6 +182,8 @@ def triage(
 
     if sample is not None and sample > 0:
         import random
+        if seed is not None:
+            random.seed(seed)
         n = min(sample, len(findings))
         findings = random.sample(findings, n)
         if verbose:
@@ -163,7 +198,14 @@ def triage(
         return
 
     # Require API key only when we are about to make real triage calls.
-    _require_api_key()
+    _require_api_key(cfg)
+
+    from vulnsift.triage import cache as triage_cache
+
+    cache_file = Path(cache_path) if cache_path else None
+    cache_map: dict[str, dict] = {}
+    if cache_file:
+        cache_map = triage_cache.load_cache(cache_file, PROMPT_VERSION)
 
     report = TriageReport(source_file=str(input_path), prompt_version=PROMPT_VERSION, entries=[])
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -171,11 +213,22 @@ def triage(
     with progress_spinner(console) as progress:
         task = progress.add_task("Triaging findings...", total=len(findings)) if progress else None
         for f in findings:
+            fp = triage_cache.fingerprint(f, PROMPT_VERSION, redact_code)
+            if cache_file and fp in cache_map:
+                cached_entry = triage_cache.cache_entry_to_report_entry(f, cache_map[fp])
+                if cached_entry is not None:
+                    report.entries.append(cached_entry)
+                    if verbose:
+                        console.print(f"[dim]Cache hit {f.id}[/]")
+                    if task is not None:
+                        progress.advance(task)
+                    continue
             try:
                 triage_result, remediation = triage_finding(f, project_context=context, redact_code=redact_code)
-                report.entries.append(
-                    TriageReportEntry(finding=f, triage=triage_result, remediation=remediation)
-                )
+                entry = TriageReportEntry(finding=f, triage=triage_result, remediation=remediation)
+                report.entries.append(entry)
+                if cache_file:
+                    cache_map[fp] = triage_cache.report_entry_to_cache_dict(entry)
             except Exception as e:
                 if verbose:
                     console.print(f"[yellow]Skip {f.id}:[/] {e}")
@@ -192,6 +245,11 @@ def triage(
                 )
             if task is not None:
                 progress.advance(task)
+
+    if cache_file:
+        triage_cache.save_cache(cache_file, cache_map, PROMPT_VERSION)
+        if verbose:
+            console.print(f"[dim]Wrote triage cache to {cache_file}[/]")
 
     report.entries.sort(key=lambda e: (-e.triage.risk_score, e.finding.id))
 
@@ -226,19 +284,27 @@ def triage(
     epilog="""
 Examples:
   vulnsift report --input ./vulnsift-output/triage-report.json
+  vulnsift report --input ./out/current.json --baseline ./out/previous.json
 """,
 )
 @click.option("--input", "input_path", required=True, type=click.Path(exists=True), help="Triage report JSON file.")
-def report(input_path: str) -> None:
+@click.option(
+    "--baseline",
+    "baseline_path",
+    type=click.Path(exists=True),
+    default=None,
+    help="Optional baseline triage report to compare against.",
+)
+@click.option("--top", type=int, default=5, show_default=True, help="How many hotspots/priorities to display.")
+def report(input_path: str, baseline_path: str | None, top: int) -> None:
     """Summarize a previously exported triage report (JSON)."""
-    path = Path(input_path)
-    if path.suffix.lower() != ".json":
-        _err_with_hint("Expected a JSON file (e.g. triage-report.json).")
-    try:
-        report_obj = TriageReport.model_validate_json(path.read_text(encoding="utf-8"))
-    except Exception as e:
-        _err_with_hint(str(e), "Tip: generate with `vulnsift triage --input <scan> --export json`.")
+    report_obj = _load_triage_report(input_path)
     render_summary_table(report_obj, include_false_positives=True, console=console)
+    render_report_insights(report_obj, top_n=top, console=console)
+    if baseline_path:
+        baseline_report = _load_triage_report(baseline_path)
+        comparison = compare_reports(report_obj, baseline_report)
+        render_comparison_summary(comparison, top_n=top, console=console)
 
 
 @main.command(
@@ -277,48 +343,190 @@ def validate(input_path: str, fmt: str) -> None:
 @main.command(
     epilog="""
 Examples:
-  vulnsift autofix --input vulnsift-output/triage-report.json --dry-run
-  vulnsift autofix --input report.json --min-risk 8
-  vulnsift autofix --input report.json --open-pr
+  vulnsift compare --current ./out/current.json --baseline ./out/previous.json
+  vulnsift compare --current report.json --baseline baseline.json --fail-on-new-risk 7
+""",
+)
+@click.option("--current", "current_path", required=True, type=click.Path(exists=True), help="Current triage report.")
+@click.option(
+    "--baseline",
+    "baseline_path",
+    required=True,
+    type=click.Path(exists=True),
+    help="Baseline triage report.",
+)
+@click.option("--top", type=int, default=5, show_default=True, help="How many findings to show per comparison section.")
+@click.option(
+    "--fail-on-new-risk",
+    type=float,
+    default=None,
+    help="Exit with code 2 if any new actionable finding has risk >= this threshold.",
+)
+def compare(current_path: str, baseline_path: str, top: int, fail_on_new_risk: float | None) -> None:
+    """Compare two triage reports to spot regressions, fixes, and risk movement."""
+    current_report = _load_triage_report(current_path)
+    baseline_report = _load_triage_report(baseline_path)
+
+    comparison = compare_reports(current_report, baseline_report)
+    render_comparison_summary(comparison, top_n=top, console=console)
+
+    if fail_on_new_risk is not None:
+        new_findings = comparison["new_findings"]
+        new_high_risk = [
+            item for item in new_findings if float(item["risk_score"]) >= float(fail_on_new_risk)
+        ]
+        if new_high_risk:
+            console.print(
+                f"[red]Regression gate failed:[/] {len(new_high_risk)} new actionable finding(s) "
+                f"with risk >= {fail_on_new_risk}."
+            )
+            raise SystemExit(2)
+
+
+@main.command(
+    epilog="""
+Examples:
+  vulnsift share --input ./out/triage-report.json --output ./out/triage-report.html
+  vulnsift share --input current.json --baseline previous.json --output comparison.html
 """,
 )
 @click.option("--input", "input_path", required=True, type=click.Path(exists=True), help="Triage report JSON file.")
-@click.option("--dry-run", is_flag=True, help="Show diffs without modifying files or creating PRs.")
+@click.option(
+    "--baseline",
+    "baseline_path",
+    type=click.Path(exists=True),
+    default=None,
+    help="Optional baseline triage report to include comparison insights.",
+)
+@click.option("--output", "output_path", required=True, type=click.Path(), help="HTML file to write.")
+@click.option("--title", default=None, help="Optional page title for the shared report.")
+@click.option("--top", type=int, default=10, show_default=True, help="How many hotspots and findings to display.")
+def share(input_path: str, baseline_path: str | None, output_path: str, title: str | None, top: int) -> None:
+    """Write a standalone HTML report artifact for sharing triage results."""
+    report_obj = _load_triage_report(input_path)
+    baseline_report = _load_triage_report(baseline_path) if baseline_path else None
+
+    html = render_html_report(report_obj, baseline=baseline_report, title=title, top_n=top)
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(html, encoding="utf-8")
+    console.print(f"[green]Wrote standalone HTML report to {output}[/]")
+
+
+@main.command(
+    epilog="""
+Examples:
+  vulnsift backlog --input ./out/triage-report.json --format csv --output ./out/backlog.csv
+  vulnsift backlog --input ./out/triage-report.json --format md --top 15
+""",
+)
+@click.option("--input", "input_path", required=True, type=click.Path(exists=True), help="Triage report JSON file.")
+@click.option(
+    "--format",
+    "export_format",
+    type=click.Choice(["csv", "json", "md"]),
+    default="csv",
+    show_default=True,
+    help="Backlog export format.",
+)
+@click.option("--output", "output_path", type=click.Path(), default=None, help="Optional file path to write.")
+@click.option("--min-risk", type=float, default=4.0, show_default=True, help="Minimum risk score to include.")
+@click.option("--top", type=int, default=25, show_default=True, help="How many backlog items to include.")
+def backlog(
+    input_path: str,
+    export_format: str,
+    output_path: str | None,
+    min_risk: float,
+    top: int,
+) -> None:
+    """Export a prioritized remediation backlog from a triage report."""
+    report_obj = _load_triage_report(input_path)
+    rendered = render_backlog(report_obj, export_format=export_format, top=top, min_risk=min_risk)
+    if output_path:
+        output = Path(output_path)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(rendered, encoding="utf-8")
+        console.print(f"[green]Wrote prioritized backlog to {output}[/]")
+    else:
+        click.echo(rendered)
+
+
+@main.command(
+    epilog="""
+Examples:
+  vulnsift autofix --input vulnsift-output/triage-report.json --dry-run
+  vulnsift autofix --input report.json --list-only
+  vulnsift autofix --input report.json --min-risk 8 --max-fixes 3
+  vulnsift autofix --input report.json --open-pr
+
+Note: --dry-run still calls the Anthropic API to generate patches; it only skips writing files/PRs.
+Use --list-only to print eligible findings without any API calls.
+""",
+)
+@click.option("--input", "input_path", required=True, type=click.Path(exists=True), help="Triage report JSON file.")
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Call API to generate patches and print diffs; do not modify files or create PRs.",
+)
+@click.option(
+    "--list-only",
+    is_flag=True,
+    help="Print eligible findings (no API calls, no disk writes).",
+)
 @click.option("--min-risk", type=float, default=7.0, help="Minimum risk score to attempt auto-fix (default: 7).")
+@click.option("--max-fixes", type=int, default=None, help="Cap how many findings to send to the model (order: report).")
 @click.option("--repo-root", type=click.Path(exists=True), default=".", help="Repository root (default: current dir).")
 @click.option("--open-pr", is_flag=True, help="Create a GitHub PR for each fix (requires gh CLI).")
 @click.option("--verbose", "-v", is_flag=True, help="Verbose output.")
 def autofix(
     input_path: str,
     dry_run: bool,
+    list_only: bool,
     min_risk: float,
+    max_fixes: int | None,
     repo_root: str,
     open_pr: bool,
     verbose: bool,
 ) -> None:
-    """Generate AI-powered code patches for high-risk findings."""
+    """Generate AI-powered code patches for high-risk findings (sends source code to the model)."""
     from vulnsift.autofix.agent import autofix_report as run_autofix
     from vulnsift.autofix.patches import generate_diff
 
-    path = Path(input_path)
-    if path.suffix.lower() != ".json":
-        _err_with_hint("Expected a JSON file (e.g. triage-report.json).")
-    try:
-        report_obj = TriageReport.model_validate_json(path.read_text(encoding="utf-8"))
-    except Exception as e:
-        _err_with_hint(str(e), "Tip: generate with `vulnsift triage --input <scan> --export json`.")
+    report_obj = _load_triage_report(input_path)
+
+    cfg = load_config()
+    root = Path(repo_root).resolve()
+
+    if list_only:
+        from vulnsift.autofix.agent import _filter_eligible
+
+        eligible = _filter_eligible(report_obj.entries, min_risk)
+        if max_fixes is not None and max_fixes > 0:
+            eligible = eligible[:max_fixes]
+        if not eligible:
+            console.print("[yellow]No eligible findings for auto-fix at this min-risk.[/]")
+            return
+        console.print(f"[dim]{len(eligible)} eligible finding(s) (no API calls):[/]")
+        for e in eligible:
+            console.print(
+                f"  - [bold]{e.finding.id}[/] risk={e.triage.risk_score} "
+                f"{e.finding.location.file_path}:{e.finding.location.start_line or '?'}"
+            )
+        return
 
     if not dry_run:
-        _require_api_key()
+        _require_api_key(cfg)
 
-    root = Path(repo_root).resolve()
     console.print(f"[dim]Auto-fixing findings with risk >= {min_risk} in {root}[/]")
+    console.print(
+        "[dim]Autofix sends finding metadata and full source files to the Anthropic API.[/]"
+    )
 
     if dry_run:
-        # In dry-run mode, we still call the API to generate patches but don't apply them
-        _require_api_key()
+        _require_api_key(cfg)
 
-    results = run_autofix(report_obj, root, dry_run=dry_run, min_risk=min_risk)
+    results = run_autofix(report_obj, root, dry_run=dry_run, min_risk=min_risk, max_fixes=max_fixes)
 
     if not results:
         console.print("[yellow]No eligible findings to auto-fix.[/]")
@@ -395,13 +603,7 @@ def github_comment(input_path: str, threshold: float | None, output_path: str | 
     """Render a GitHub PR comment from a triage report."""
     from vulnsift.output.github_comment import render_github_comment
 
-    path = Path(input_path)
-    if path.suffix.lower() != ".json":
-        _err_with_hint("Expected a JSON file (e.g. triage-report.json).")
-    try:
-        report_obj = TriageReport.model_validate_json(path.read_text(encoding="utf-8"))
-    except Exception as e:
-        _err_with_hint(str(e), "Tip: generate with `vulnsift triage --input <scan> --export json`.")
+    report_obj = _load_triage_report(input_path)
     md = render_github_comment(report_obj, threshold=threshold)
     if output_path:
         out = Path(output_path)
@@ -425,13 +627,7 @@ def store(input_path: str, db_path: str | None) -> None:
     """Store a triage report in the dashboard database."""
     from vulnsift.dashboard.db import init_db, store_report
 
-    path = Path(input_path)
-    if path.suffix.lower() != ".json":
-        _err_with_hint("Expected a JSON file (e.g. triage-report.json).")
-    try:
-        report_obj = TriageReport.model_validate_json(path.read_text(encoding="utf-8"))
-    except Exception as e:
-        _err_with_hint(str(e), "Tip: generate with `vulnsift triage --input <scan> --export json`.")
+    report_obj = _load_triage_report(input_path)
 
     conn = init_db(db_path) if db_path else init_db()
     scan_id = store_report(conn, report_obj)

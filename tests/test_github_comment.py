@@ -30,6 +30,7 @@ class TestRenderGithubComment:
         assert "| 5 |" in md  # 5 total entries
         assert "Highest risk score" in md
         assert "Actionable findings" in md
+        assert "Average actionable risk" in md
 
     def test_gate_passed(self):
         report = _load_report()
@@ -59,8 +60,14 @@ class TestRenderGithubComment:
     def test_remediation_actions(self):
         report = _load_report()
         md = render_github_comment(report)
-        assert "Recommended actions" in md
-        assert "parameterised queries" in md
+        assert "Immediate priorities" in md
+        assert "Use parameterised queries" in md
+
+    def test_hotspots_section(self):
+        report = _load_report()
+        md = render_github_comment(report)
+        assert "Riskiest files" in md
+        assert "src/db/queries.py" in md
 
     def test_empty_report(self):
         report = TriageReport(source_file="empty.json", entries=[])

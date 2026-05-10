@@ -82,12 +82,45 @@ class TestDashboardRoutes:
         data = resp.get_json()
         assert len(data) == 1
 
+    def test_api_overview(self, client):
+        c, db_path = client
+        conn = init_db(str(db_path))
+        store_report(conn, _make_report())
+        conn.close()
+        resp = c.get("/api/overview")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["total_scans"] == 1
+        assert data["latest_scan"]["source_file"] == "test.sarif"
+
     def test_api_recurring(self, client):
         c, db_path = client
         conn = init_db(str(db_path))
         store_report(conn, _make_report())
         conn.close()
         resp = c.get("/api/recurring")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert len(data) == 1
+        assert data[0]["rule_id"] == "sql-injection"
+
+    def test_api_hotspots(self, client):
+        c, db_path = client
+        conn = init_db(str(db_path))
+        store_report(conn, _make_report())
+        conn.close()
+        resp = c.get("/api/hotspots")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert len(data) == 1
+        assert data[0]["file_path"] == "app.py"
+
+    def test_api_priorities(self, client):
+        c, db_path = client
+        conn = init_db(str(db_path))
+        store_report(conn, _make_report())
+        conn.close()
+        resp = c.get("/api/priorities")
         assert resp.status_code == 200
         data = resp.get_json()
         assert len(data) == 1

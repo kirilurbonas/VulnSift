@@ -2,9 +2,29 @@
 
 **AI-powered vulnerability triage and remediation** — from scanner noise to fixed code.
 
-VulnSift ingests SAST/SCA scanner output (SARIF, Snyk, Semgrep, Trivy), uses Claude to score real-world risk, flags false positives, generates remediation cards, and **automatically creates fix PRs** for high-risk findings. Run it as a **GitHub Action** that posts risk summaries on every PR, or explore trends in the built-in **web dashboard**.
+VulnSift ingests SAST/SCA scanner output (SARIF, Snyk, Semgrep, Trivy), uses Claude to score real-world risk, flags false positives, generates remediation cards, and can **generate fix patches** (and open PRs) for high-risk findings. Run it as a **GitHub Action** that posts risk summaries on PRs, compare reports to spot regressions, or explore trends in the optional **web dashboard**.
 
-**For:** Security engineers, AppSec teams, and developers who want to go from scan results to merged fixes — not just reports.
+**For:** Security engineers, AppSec teams, and developers who want to go from scan results to actionable fixes — not only reports.
+
+## Contents
+
+- [Try it in 30 seconds](#try-it-in-30-seconds-no-api-key-needed)
+- [Key features](#key-features)
+- [Requirements](#requirements)
+- [Privacy and data sent to the API](#privacy-and-data-sent-to-the-api)
+- [Install](#install)
+- [Quick start](#quick-start)
+- [Commands](#commands)
+- [Triage options](#options-triage)
+- [Autofix options](#autofix-options)
+- [Config file](#config-file)
+- [Exit codes](#exit-codes)
+- [Supported scan formats](#supported-scan-formats)
+- [GitHub Action](#github-action)
+- [Web dashboard](#web-dashboard)
+- [CI examples](#running-vulnsift-in-ci-manual)
+- [FAQ](#faq--gotchas)
+- [Development](#development)
 
 ## Try it in 30 seconds (no API key needed)
 
@@ -15,21 +35,40 @@ vulnsift validate --input fixtures/sample.sarif.json
 vulnsift triage --input fixtures/sample.sarif.json --dry-run
 ```
 
-Use `--dry-run` and `validate` anytime to parse and inspect; only `triage` (real AI calls) needs `ANTHROPIC_API_KEY`.
+Use `validate` and `triage --dry-run` to parse and inspect without the API. Real triage and autofix (except `--list-only`) need an Anthropic API key (env, `.env`, or `api_key_file` in config — see [Config file](#config-file)).
 
 ## Key features
 
-- **Multi-scanner ingestion**: SARIF 2.1.0, Snyk, Semgrep, and Trivy JSON normalized into a single `UnifiedFinding` model.
-- **AI triage with risk scoring**: Claude assesses exploitability and business context, producing a 0–10 risk score and false-positive flag.
-- **Auto-fix agent**: Generates code patches for high-risk findings and opens fix PRs automatically.
-- **GitHub Action**: First-class CI gate that posts a risk summary comment on every PR.
-- **Web dashboard**: Scan history, risk trends, recurring vulnerabilities, and remediation progress.
-- **Developer-friendly remediation cards**: Markdown cards with business impact, step-by-step fixes, and code snippets.
+- **Multi-scanner ingestion**: SARIF 2.1.0, Snyk, Semgrep, and Trivy JSON normalized into a single `UnifiedFinding` model; `--format auto` detects the format.
+- **AI triage**: 0–10 risk score, false-positive flag, Markdown remediation cards, optional JSON export (`schema_version` / `prompt_version` on reports).
+- **Cost controls**: `--limit`, `--sample` + `--seed`, optional **`--cache`** JSON to reuse triage for unchanged findings when `prompt_version` matches.
+- **CI gates**: `--gate-threshold` (exit code 2) or the same via `vulnsift.yaml`.
+- **Baseline compare**: `vulnsift compare` and `vulnsift report --baseline ...` show new, resolved, and escalating findings between scans.
+- **Shareable artifacts**: `vulnsift share` writes a standalone HTML report you can upload as a CI artifact or circulate internally.
+- **Prioritized backlog**: `vulnsift backlog` exports remediation work as CSV, JSON, or Markdown for tickets and planning.
+- **Auto-fix**: Patches for high-risk findings; `--dry-run`, `--list-only`, `--max-fixes`, optional `--open-pr` (requires `gh`).
+- **GitHub Action**: PR comment with risk summary and optional gate.
+- **Web dashboard** (optional extra): Store reports and view latest scan health, hotspots, priorities, and trends (`vulnsift[dashboard]`).
+- **`github-comment`**: Render a PR-ready Markdown comment from `triage-report.json`.
 
 ## Requirements
 
 - Python 3.11+
-- [Anthropic API key](https://console.anthropic.com/) (for AI triage)
+- [Anthropic API key](https://console.anthropic.com/) for commands that call the API (`triage`, `autofix` except `--list-only`)
+
+## Privacy and data sent to the API
+
+| Command | Calls Anthropic? | What is sent (summary) |
+|---------|------------------|-------------------------|
+| `validate` | No | Local file only. |
+| `triage` | Yes (per finding) | Finding metadata, descriptions, locations; code snippets unless `--redact-code`. |
+| `triage --dry-run` | No | Local parse only. |
+| `autofix` | Yes (per eligible file) | Finding context plus **full contents** of each affected source file (up to an internal size cap). |
+| `autofix --dry-run` | Yes | Same as `autofix`; only file writes / PRs are skipped. |
+| `autofix --list-only` | No | Reads triage JSON only; prints eligible paths. |
+| `github-comment`, `store`, `report`, `compare`, `share`, `backlog` | No | Local JSON / DB only. |
+
+Run `vulnsift --help` for **exit codes** (0 = success, 1 = error, 2 = triage gate failed).
 
 ## Install
 
@@ -37,7 +76,15 @@ Use `--dry-run` and `validate` anytime to parse and inspect; only `triage` (real
 pip install vulnsift
 ```
 
-Or from source:
+Optional extras:
+
+```bash
+pip install "vulnsift[dotenv]"    # auto-load .env for ANTHROPIC_API_KEY
+pip install "vulnsift[dashboard]" # Flask web dashboard
+pip install "vulnsift[dotenv,dashboard]"
+```
+
+From source:
 
 ```bash
 git clone https://github.com/kirilurbonas/vulnsift.git
@@ -47,11 +94,10 @@ pip install .
 
 ## Quick start
 
-For real triage (AI calls), set your API key. Optionally use a `.env` file in the project root — VulnSift auto-loads it if `python-dotenv` is installed (`pip install vulnsift[dotenv]` or `pip install python-dotenv`):
+Set your API key, or put it in `.env` (with `vulnsift[dotenv]`), or point `api_key_file` in `vulnsift.yaml` at a small file whose **trimmed contents** are the key (typically one line):
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
-# Or: add ANTHROPIC_API_KEY=sk-ant-... to .env and install vulnsift[dotenv]
 ```
 
 ### Usage overview
@@ -60,16 +106,24 @@ export ANTHROPIC_API_KEY=sk-ant-...
 # 1) Sanity-check a scan file (no API calls; format auto-detected)
 vulnsift validate --input scan.sarif --format auto
 
-# 2) Triage findings and write remediation cards + JSON report
+# 2) Triage and write remediation + JSON report
 vulnsift triage --input scan.sarif --format auto --export json --output-dir ./out
 
-# 3) Re-print a summary from a previous JSON report
+# 3) Re-print summary from exported JSON, with hotspots and priorities
 vulnsift report --input ./out/triage-report.json
+
+# 4) Compare against a baseline report to spot regressions and wins
+vulnsift compare --current ./out/triage-report.json --baseline ./out/previous-triage-report.json
+
+# 5) Export a standalone HTML artifact or remediation backlog
+vulnsift share --input ./out/triage-report.json --output ./out/triage-report.html
+vulnsift backlog --input ./out/triage-report.json --format csv --output ./out/backlog.csv
+
+# 6) Optional: CI-friendly gate + cache (reuse triage when inputs unchanged)
+vulnsift triage --input scan.sarif --export json --gate-threshold 7 --cache .vulnsift/triage-cache.json
 ```
 
 ### Usage: validate
-
-Validate a scan file and see how many findings VulnSift can parse (no API calls):
 
 ```bash
 vulnsift validate --input scan.sarif --format auto
@@ -77,49 +131,83 @@ vulnsift validate --input scan.sarif --format auto
 
 ### Usage: triage
 
-Run AI triage over findings, print a risk-ranked summary table, and write remediation cards and an optional JSON or single-Markdown report:
-
 ```bash
 vulnsift triage --input scan.sarif --format auto --export json --output-dir ./out
-vulnsift triage --input scan.sarif --export md-single   # one remediation.md file
+vulnsift triage --input scan.sarif --export md-single   # single remediation.md
 ```
 
-Use `--dry-run` to parse only (no API calls). Use `--limit N` to triage the first N findings, or `--sample N` to randomly sample N. Use `--redact-code` to avoid sending code snippets to the model. Use `--gate-threshold 7` to exit with code 2 when any non–false-positive finding has risk ≥ 7 (for CI gates). Use `--verbose` for extra logging.
+Use `--dry-run` for parse-only. Use `--limit N` / `--sample N` (with optional `--seed`) for subsets. Use `--redact-code` to omit snippets from prompts. Use `--gate-threshold` for CI gates (exit 2). Use `--verbose` for more logging.
 
 ### Usage: report
 
-Summarize a previously exported triage report:
-
 ```bash
 vulnsift report --input ./out/triage-report.json
+vulnsift report --input ./out/triage-report.json --baseline ./out/previous-triage-report.json
+```
+
+### Usage: compare
+
+```bash
+vulnsift compare --current ./out/triage-report.json --baseline ./out/previous-triage-report.json
+vulnsift compare --current ./out/triage-report.json --baseline ./out/main-branch.json --fail-on-new-risk 7
+```
+
+### Usage: share
+
+```bash
+vulnsift share --input ./out/triage-report.json --output ./out/triage-report.html
+vulnsift share --input ./out/triage-report.json --baseline ./out/main-branch.json --output ./out/comparison.html
+```
+
+### Usage: backlog
+
+```bash
+vulnsift backlog --input ./out/triage-report.json --format csv --output ./out/backlog.csv
+vulnsift backlog --input ./out/triage-report.json --format md --top 15
 ```
 
 ## Commands
 
-| Command    | Description |
-|-----------|-------------|
-| `triage`  | Parse a scan file, triage each finding with Claude, print a colour summary table, and write Markdown remediation cards. Use `--export json` to save the full report. |
-| `validate`| Parse and validate a scan file (SARIF, Snyk, Semgrep, Trivy; use `--format auto` to detect) without calling the API. |
-| `report`  | Print a summary table from a previously exported `triage-report.json`. |
-| `autofix` | Generate AI-powered code patches for high-risk findings. Use `--dry-run` to preview diffs, `--open-pr` to create GitHub PRs. |
-| `github-comment` | Render a GitHub PR comment from a triage report JSON. Used by the GitHub Action. |
-| `store`   | Store a triage report in the dashboard database for trend tracking. |
-| `dashboard` | Launch the web dashboard (requires `pip install vulnsift[dashboard]`). |
+| Command | Description |
+|---------|-------------|
+| `triage` | Parse a scan, triage with Claude, Rich summary, Markdown cards. `--export json` saves full report. |
+| `validate` | Parse a scan (SARIF, Snyk, Semgrep, Trivy; `--format auto`) without the API. |
+| `report` | Print summary from `triage-report.json`, including hotspots and immediate priorities. |
+| `compare` | Compare two triage reports to show new, resolved, and escalating findings; optional regression gate. |
+| `share` | Write a standalone HTML artifact from a triage report, with optional baseline comparison. |
+| `backlog` | Export prioritized remediation work as CSV, JSON, or Markdown. |
+| `autofix` | Generate patches from a triage JSON. `--list-only` lists eligible items without API calls. |
+| `github-comment` | Render PR comment Markdown from a triage report (used by the GitHub Action). |
+| `store` | Append a triage report into the dashboard SQLite DB. |
+| `dashboard` | Serve the web UI (`pip install vulnsift[dashboard]`). |
 
 ## Options (triage)
 
-- **`--input`** — Scan file path (SARIF, Snyk, Semgrep, or Trivy JSON).
-- **`--format`** — `sarif`, `snyk`, `semgrep`, `trivy`, or `auto` (default: auto-detect from file).
-- **`--export`** — `json` (full report), `md` (per-finding cards), or `md-single` (one `remediation.md`).
-- **`--output-dir`** — Directory for Markdown/JSON (default: from `vulnsift.yaml` or `./vulnsift-output`).
-- **`--context`** — Project context for risk assessment (overrides config).
+- **`--input`** — Scan file (SARIF, Snyk, Semgrep, or Trivy JSON).
+- **`--format`** — `sarif`, `snyk`, `semgrep`, `trivy`, or `auto` (default).
+- **`--export`** — `json`, `md` (per-finding cards), or `md-single` (one `remediation.md`).
+- **`--output-dir`** — Output directory (default: `vulnsift.yaml` or `./vulnsift-output`).
+- **`--context`** — Project context for risk (overrides config).
 - **`--include-fp`** — Include likely false positives in the summary table.
-- **`--limit N`** — Triage only the first N findings.
-- **`--dry-run`** — Parse and validate only; do not call the triage API.
-- **`--sample N`** — Randomly sample N findings to triage (good for large scans).
-- **`--redact-code`** — Do not send code snippets to the AI model (privacy/safe mode).
-- **`--gate-threshold FLOAT`** — Exit with code 2 if any non-FP finding has risk ≥ this (CI gate).
+- **`--limit N`** — Triage only the first N findings (after sampling, if any).
+- **`--sample N`** — Randomly sample N findings before `--limit`.
+- **`--seed INT`** — RNG seed for `--sample` (reproducible CI).
+- **`--cache PATH`** — JSON cache to skip API for unchanged findings (invalidated when `prompt_version` changes).
+- **`--dry-run`** — Parse only; no API.
+- **`--redact-code`** — Do not send scanner code snippets in triage prompts.
+- **`--gate-threshold FLOAT`** — Exit 2 if any non-FP finding has risk ≥ threshold.
 - **`--verbose`** / **`-v`** — Verbose output.
+
+## Autofix options
+
+- **`--input`** — `triage-report.json` from `vulnsift triage --export json`.
+- **`--repo-root`** — Repository root (default `.`).
+- **`--min-risk`** — Minimum risk score to consider (default `7`).
+- **`--max-fixes N`** — Cap how many findings are sent to the model.
+- **`--dry-run`** — Call API, print diffs; do not write files or open PRs.
+- **`--list-only`** — Print eligible findings; **no API**, no key required.
+- **`--open-pr`** — After applying patches, create branches/PRs (needs `gh` CLI and git remote).
+- **`--verbose`** / **`-v`**
 
 ## Config file
 
@@ -128,36 +216,29 @@ Optional `vulnsift.yaml` or `.vulnsift.yaml` in the project root:
 ```yaml
 project_context: "Python app, internal only"
 output_dir: ./vulnsift-output
-api_key_file: .secrets/anthropic_key
+api_key_file: .secrets/anthropic_key   # if ANTHROPIC_API_KEY is unset: read file, strip whitespace
 redact_code: false
-gate_threshold: 7   # optional: fail CI if any non-FP risk >= 7
+gate_threshold: 7   # optional: same as triage --gate-threshold
 ```
 
-CLI options override these values.
+CLI flags override YAML.
 
 ## Exit codes
 
 - **0** — Success.
-- **1** — Error (bad input, missing config, API failure).
-- **2** — Gate failed: at least one non–false-positive finding has risk score ≥ `--gate-threshold`.
+- **1** — Error (bad input, missing key/config, API failure).
+- **2** — Gate failed: any non–false-positive finding has risk ≥ `--gate-threshold` (triage only).
 
 ## Supported scan formats
 
-- **SARIF 2.1.0** — Generic SAST output (many commercial and open-source scanners).
-- **Snyk JSON** — Output from `snyk test --json`.
-- **Semgrep JSON** — Output from `semgrep scan --json`.
-- **Trivy JSON** — Output from `trivy scan -f json` (e.g. `Results[].Vulnerabilities`).
+- **SARIF 2.1.0** — Many SAST tools and GitHub Code Scanning.
+- **Snyk JSON** — `snyk test --json`.
+- **Semgrep JSON** — `semgrep scan --json`.
+- **Trivy JSON** — `trivy scan -f json` (`Results[].Vulnerabilities`).
 
 ## Sample fixtures
 
-The repo includes minimal sample files under `fixtures/`:
-
-- `fixtures/sample.sarif.json` — SARIF 2.1.0 with one SQL injection finding.
-- `fixtures/sample.snyk.json` — Snyk-style JSON with one `lodash` vulnerability.
-- `fixtures/sample.semgrep.json` — Semgrep result (e.g. unsafe pickle).
-- `fixtures/sample.trivy.json` — Trivy vulnerability result.
-
-Try the CLI without a real scan:
+Under `fixtures/`: `sample.sarif.json`, `sample.snyk.json`, `sample.semgrep.json`, `sample.trivy.json`, and `sample-triage-report.json` (for `report` / `autofix` / `github-comment` demos).
 
 ```bash
 vulnsift validate --input fixtures/sample.sarif.json --format auto
@@ -165,7 +246,7 @@ vulnsift validate --input fixtures/sample.sarif.json --format auto
 
 ## GitHub Action
 
-VulnSift ships as a reusable GitHub Action. Add it to any PR workflow to automatically triage scanner findings and post a risk summary comment:
+Reusable action for PR workflows:
 
 ```yaml
 - name: VulnSift Triage
@@ -179,98 +260,96 @@ VulnSift ships as a reusable GitHub Action. Add it to any PR workflow to automat
     comment: "true"
 ```
 
-The action will:
-1. Run AI triage on all findings
-2. Post/update a PR comment with a risk summary table and recommended actions
-3. Fail the step if any non-FP finding scores >= the threshold (CI gate)
+The action triages findings, optionally posts/updates a PR comment, and fails the step if any non-FP finding is ≥ `threshold`.
 
-See `.github/workflows/example-vulnsift.yml` for a complete example.
+See `.github/workflows/example-vulnsift.yml` for a full workflow.
 
 ### Action inputs
 
 | Input | Required | Default | Description |
 |-------|----------|---------|-------------|
-| `scan-file` | Yes | — | Path to scanner output file |
-| `format` | No | `auto` | Scanner format (sarif, snyk, semgrep, trivy, auto) |
-| `threshold` | No | — | Gate threshold (0-10). Fail if any finding >= this |
-| `context` | No | — | Project context for risk assessment |
-| `redact-code` | No | `false` | Don't send code snippets to the model |
+| `scan-file` | Yes | — | Path to scanner output |
+| `format` | No | `auto` | `sarif`, `snyk`, `semgrep`, `trivy`, `auto` |
+| `threshold` | No | — | Gate: fail if any finding ≥ this (0–10) |
+| `context` | No | — | Project context for triage |
+| `redact-code` | No | `false` | Omit code snippets from triage prompts |
 | `anthropic-api-key` | Yes | — | Anthropic API key |
-| `github-token` | No | `github.token` | Token for posting PR comments |
-| `comment` | No | `true` | Post/update a PR comment |
+| `github-token` | No | `github.token` | Token for PR comments |
+| `comment` | No | `true` | Post/update PR comment |
 
 ## Auto-fix agent
 
-VulnSift can automatically generate code patches for high-risk findings:
+**Autofix sends full source files to the Anthropic API** (see privacy table above).
 
 ```bash
-# Preview fixes without modifying files
-vulnsift autofix --input triage-report.json --dry-run
-
-# Apply patches and create GitHub PRs
+vulnsift autofix --input triage-report.json --list-only
+vulnsift autofix --input triage-report.json --dry-run --repo-root .
+vulnsift autofix --input triage-report.json --max-fixes 3 --dry-run --repo-root .
 vulnsift autofix --input triage-report.json --open-pr --min-risk 8
 ```
 
-The auto-fix agent:
-1. Reads each high-risk finding from a triage report
-2. Loads the affected source file
-3. Uses Claude to generate a minimal, safe patch
-4. Validates the patch (syntax check for Python, brace balance for JS/TS/etc.)
-5. Optionally creates a branch and opens a PR per fix (requires `gh` CLI)
-
-Options: `--dry-run`, `--min-risk N` (default 7), `--repo-root .`, `--open-pr`.
+Flow: load triage JSON → filter by risk / FP / remediation → read source files → Claude proposes patches → validate → apply (unless dry-run) → optional PRs via `gh`.
 
 ## Web dashboard
 
-Track scan results over time with the built-in dashboard:
-
 ```bash
-pip install vulnsift[dashboard]
-
-# Store reports after each triage
+pip install "vulnsift[dashboard]"
 vulnsift triage --input scan.sarif --export json
 vulnsift store --input vulnsift-output/triage-report.json
-
-# Launch dashboard
 vulnsift dashboard --port 8080
 ```
 
-The dashboard shows:
-- **Scan history** — all stored scans with findings counts and risk scores
-- **Risk trends** — max and average risk score over time
-- **Top recurring vulnerabilities** — most frequent rules across scans
-- **Severity breakdown** — critical / medium / low / false positive distribution
+The dashboard highlights the latest scan pulse, file hotspots, immediate priorities, recurring rules, and risk trends so teams can decide what to fix first without leaving the browser.
+
+Default bind is **127.0.0.1**. Do not bind **0.0.0.0** on the public internet without auth and a reverse proxy; prefer SSH tunnel or VPN for remote access.
 
 ## Running VulnSift in CI (manual)
-
-For CI setups without the GitHub Action, run VulnSift directly:
 
 ```yaml
 - name: VulnSift triage
   env:
     ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
   run: |
-    vulnsift triage --input scan-results.sarif --format auto --export json --output-dir ./vulnsift-out
+    vulnsift triage --input scan-results.sarif --format auto \
+      --export json --output-dir ./vulnsift-out \
+      --gate-threshold 7 --cache .vulnsift/triage-cache.json
+```
+
+Upload `vulnsift-out/triage-report.json` as a workflow artifact if you need `report`, `github-comment`, or `autofix` in later steps.
+
+To guard against regressions in a later step, compare the artifact against a baseline report:
+
+```bash
+vulnsift compare --current vulnsift-out/triage-report.json \
+  --baseline baseline-triage-report.json \
+  --fail-on-new-risk 7
+```
+
+To make the results easy to circulate, also emit an HTML report and backlog artifact:
+
+```bash
+vulnsift share --input vulnsift-out/triage-report.json --output vulnsift-out/triage-report.html
+vulnsift backlog --input vulnsift-out/triage-report.json --format csv --output vulnsift-out/backlog.csv
 ```
 
 ## FAQ / Gotchas
 
-- **No API key?** Use `vulnsift validate` or `vulnsift triage --dry-run` to parse and inspect scans without calling the API.
-- **Cost / rate limits?** Triage calls Claude per finding. Use `--limit N` to cap the number of findings (e.g. `--limit 20` for a quick run).
-- **Unsupported format?** Use `--format sarif|snyk|semgrep|trivy` if auto-detection fails, or open an issue with a sample (redacted).
-- **Large scans?** Use `--limit N` or `--sample N` to triage a subset; VulnSift will warn when a scan has >1000 findings.
+- **No API key?** Use `validate`, `triage --dry-run`, or `autofix --list-only`. For triage/autofix API runs, set `ANTHROPIC_API_KEY`, use `.env` with `[dotenv]`, or `api_key_file` in YAML.
+- **Cost / rate limits?** Triage is one API call per finding; autofix is per eligible file. Use `--limit`, `--sample`, `--cache` (triage), or `--max-fixes` (autofix).
+- **Unsupported format?** Pass `--format sarif|snyk|semgrep|trivy` if auto-detect fails.
+- **Large scans?** Subset with `--limit` / `--sample`; a warning appears when there are more than 1000 findings.
 
 ## Development
 
 ```bash
-pip install . pytest pytest-asyncio ruff
+pip install ".[dashboard,dotenv]" pytest pytest-asyncio ruff
 ruff check vulnsift tests
 pytest tests/ -v
 ```
 
-For more details (including contribution guidelines), see `CONTRIBUTING.md`.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines and [CHANGELOG.md](CHANGELOG.md) for release notes.
 
-**Feedback:** [Open an issue](https://github.com/kirilurbonas/VulnSift/issues) — we’re especially interested in how AppSec and dev teams use VulnSift in real pipelines.
+**Feedback:** [Issues](https://github.com/kirilurbonas/VulnSift/issues) — we welcome real-world pipeline stories.
 
 ## License
 

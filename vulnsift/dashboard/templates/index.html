@@ -4,144 +4,953 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>VulnSift Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <style>
-  :root { --bg: #0f1117; --card: #1a1d27; --border: #2a2d3a; --text: #e4e4e7; --muted: #71717a; --accent: #8b5cf6; --red: #ef4444; --orange: #f97316; --green: #22c55e; }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
-  .container { max-width: 1200px; margin: 0 auto; padding: 2rem 1rem; }
-  h1 { font-size: 1.8rem; font-weight: 700; margin-bottom: 0.5rem; }
-  h1 span { color: var(--accent); }
-  .subtitle { color: var(--muted); margin-bottom: 2rem; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
-  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 1.5rem; }
-  .card h2 { font-size: 0.875rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem; }
-  .stat { font-size: 2rem; font-weight: 700; }
-  .stat.red { color: var(--red); }
-  .stat.orange { color: var(--orange); }
-  .stat.green { color: var(--green); }
-  .chart-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem; }
-  .chart-card h2 { font-size: 1rem; margin-bottom: 1rem; }
-  table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
-  th, td { padding: 0.75rem 1rem; text-align: left; border-bottom: 1px solid var(--border); }
-  th { color: var(--muted); font-weight: 500; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.05em; }
-  .risk-badge { display: inline-block; padding: 2px 8px; border-radius: 9999px; font-weight: 600; font-size: 0.75rem; }
-  .risk-high { background: rgba(239,68,68,0.15); color: var(--red); }
-  .risk-med { background: rgba(249,115,22,0.15); color: var(--orange); }
-  .risk-low { background: rgba(34,197,94,0.15); color: var(--green); }
-  .empty { text-align: center; padding: 3rem; color: var(--muted); }
-  .two-col { display: grid; grid-template-columns: 2fr 1fr; gap: 1.5rem; }
-  @media (max-width: 768px) { .two-col { grid-template-columns: 1fr; } }
+  :root {
+    --bg: #f5f0e4;
+    --bg-strong: #fffdf7;
+    --surface: rgba(255, 253, 247, 0.9);
+    --surface-strong: rgba(255, 255, 255, 0.96);
+    --line: rgba(24, 32, 43, 0.11);
+    --line-strong: rgba(24, 32, 43, 0.18);
+    --ink: #18202b;
+    --muted: #61707d;
+    --accent: #0f766e;
+    --accent-soft: #d8f2ee;
+    --danger: #d9485f;
+    --danger-soft: #ffe0e5;
+    --warning: #d97706;
+    --warning-soft: #ffe8c7;
+    --success: #2f855a;
+    --success-soft: #ddf8e7;
+    --shadow: 0 24px 70px rgba(24, 32, 43, 0.12);
+    --radius-xl: 28px;
+    --radius-lg: 20px;
+    --radius-md: 14px;
+  }
+
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    min-height: 100vh;
+    color: var(--ink);
+    font-family: "Space Grotesk", "Segoe UI", sans-serif;
+    background:
+      radial-gradient(circle at top left, rgba(15, 118, 110, 0.18), transparent 32%),
+      radial-gradient(circle at top right, rgba(217, 72, 95, 0.14), transparent 22%),
+      linear-gradient(180deg, #fbf7ee 0%, var(--bg) 100%);
+    line-height: 1.55;
+    position: relative;
+  }
+
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background-image:
+      linear-gradient(rgba(24, 32, 43, 0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(24, 32, 43, 0.03) 1px, transparent 1px);
+    background-size: 36px 36px;
+    mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.7), transparent 90%);
+  }
+
+  .page {
+    width: min(1320px, calc(100vw - 2rem));
+    margin: 0 auto;
+    padding: 1.5rem 0 2.5rem;
+    position: relative;
+    z-index: 1;
+  }
+
+  .hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1.3fr) minmax(320px, 0.9fr);
+    gap: 1.25rem;
+    margin-bottom: 1.25rem;
+  }
+
+  .panel {
+    background: var(--surface);
+    backdrop-filter: blur(18px);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+
+  .hero-main {
+    padding: 2rem;
+    position: relative;
+    min-height: 280px;
+    background:
+      radial-gradient(circle at 80% 10%, rgba(15, 118, 110, 0.14), transparent 30%),
+      linear-gradient(135deg, rgba(255, 255, 255, 0.8), rgba(255, 248, 233, 0.85));
+  }
+
+  .hero-main::after {
+    content: "";
+    position: absolute;
+    right: -80px;
+    bottom: -80px;
+    width: 240px;
+    height: 240px;
+    background: linear-gradient(135deg, rgba(15, 118, 110, 0.18), rgba(217, 72, 95, 0.12));
+    border-radius: 999px;
+    filter: blur(10px);
+  }
+
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.4rem 0.75rem;
+    border-radius: 999px;
+    border: 1px solid rgba(15, 118, 110, 0.15);
+    background: rgba(255, 255, 255, 0.7);
+    color: var(--accent);
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-weight: 700;
+  }
+
+  .hero-main h1 {
+    font-size: clamp(2.2rem, 5vw, 4.4rem);
+    line-height: 0.94;
+    letter-spacing: -0.06em;
+    max-width: 10ch;
+    margin: 1rem 0 0.85rem;
+  }
+
+  .hero-main p {
+    max-width: 56ch;
+    color: var(--muted);
+    font-size: 1rem;
+  }
+
+  .hero-meta {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.9rem;
+    margin-top: 1.5rem;
+    max-width: 560px;
+  }
+
+  .meta-card {
+    padding: 1rem 1.05rem;
+    border-radius: var(--radius-md);
+    background: rgba(255, 255, 255, 0.68);
+    border: 1px solid rgba(24, 32, 43, 0.08);
+  }
+
+  .meta-card .label {
+    display: block;
+    color: var(--muted);
+    font-size: 0.8rem;
+    margin-bottom: 0.3rem;
+  }
+
+  .meta-card .value {
+    font-size: 1.05rem;
+    font-weight: 700;
+  }
+
+  .hero-side {
+    padding: 1.6rem;
+    display: grid;
+    gap: 1rem;
+    align-content: start;
+  }
+
+  .hero-side h2,
+  .section-title,
+  .mini-title {
+    font-size: 0.82rem;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--muted);
+  }
+
+  .status-tile {
+    padding: 1rem 1.1rem;
+    border-radius: var(--radius-lg);
+    background: var(--surface-strong);
+    border: 1px solid var(--line);
+  }
+
+  .status-tile strong {
+    display: block;
+    margin-top: 0.35rem;
+    font-size: 1.8rem;
+    line-height: 1;
+    letter-spacing: -0.05em;
+  }
+
+  .delta-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.8rem;
+  }
+
+  .delta-pill,
+  .band-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    border-radius: 999px;
+    padding: 0.45rem 0.75rem;
+    font-size: 0.8rem;
+    font-weight: 700;
+  }
+
+  .delta-good,
+  .band-low {
+    background: var(--success-soft);
+    color: var(--success);
+  }
+
+  .delta-bad,
+  .band-critical {
+    background: var(--danger-soft);
+    color: var(--danger);
+  }
+
+  .delta-flat,
+  .band-medium {
+    background: var(--warning-soft);
+    color: var(--warning);
+  }
+
+  .stats-grid,
+  .chart-grid,
+  .split-grid {
+    display: grid;
+    gap: 1rem;
+    margin-bottom: 1rem;
+  }
+
+  .stats-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .chart-grid {
+    grid-template-columns: minmax(0, 1.5fr) minmax(320px, 0.85fr);
+  }
+
+  .split-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .stat-card,
+  .section-card {
+    padding: 1.3rem 1.35rem;
+    border-radius: var(--radius-lg);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    box-shadow: 0 10px 30px rgba(24, 32, 43, 0.05);
+  }
+
+  .stat-card .value {
+    display: block;
+    margin-top: 0.45rem;
+    font-size: 2.4rem;
+    line-height: 1;
+    letter-spacing: -0.06em;
+    font-weight: 700;
+  }
+
+  .stat-card .sub {
+    margin-top: 0.65rem;
+    color: var(--muted);
+    font-size: 0.92rem;
+  }
+
+  .section-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+    margin-bottom: 1rem;
+  }
+
+  .section-head p {
+    color: var(--muted);
+    max-width: 48ch;
+    font-size: 0.95rem;
+  }
+
+  .mono {
+    font-family: "IBM Plex Mono", monospace;
+  }
+
+  .chart-wrap {
+    position: relative;
+    min-height: 280px;
+  }
+
+  canvas {
+    width: 100% !important;
+    height: 100% !important;
+  }
+
+  .list {
+    display: grid;
+    gap: 0.8rem;
+  }
+
+  .list-item {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.75rem;
+    padding: 0.95rem 1rem;
+    border-radius: var(--radius-md);
+    background: var(--surface-strong);
+    border: 1px solid var(--line);
+  }
+
+  .list-item strong {
+    font-size: 0.98rem;
+  }
+
+  .list-item p {
+    color: var(--muted);
+    margin-top: 0.25rem;
+    font-size: 0.9rem;
+  }
+
+  .risk-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 3rem;
+    height: 2rem;
+    padding: 0 0.75rem;
+    border-radius: 999px;
+    font-weight: 700;
+    font-family: "IBM Plex Mono", monospace;
+    border: 1px solid transparent;
+  }
+
+  .risk-high {
+    color: var(--danger);
+    background: var(--danger-soft);
+    border-color: rgba(217, 72, 95, 0.18);
+  }
+
+  .risk-med {
+    color: var(--warning);
+    background: var(--warning-soft);
+    border-color: rgba(217, 119, 6, 0.18);
+  }
+
+  .risk-low {
+    color: var(--success);
+    background: var(--success-soft);
+    border-color: rgba(47, 133, 90, 0.18);
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  th,
+  td {
+    padding: 0.8rem 0.55rem;
+    text-align: left;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+
+  th {
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-size: 0.72rem;
+    font-weight: 700;
+  }
+
+  td {
+    font-size: 0.92rem;
+  }
+
+  tbody tr:hover {
+    background: rgba(15, 118, 110, 0.04);
+  }
+
+  code {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.83rem;
+  }
+
+  .footnote {
+    color: var(--muted);
+    font-size: 0.9rem;
+    padding: 0.75rem 0 0;
+  }
+
+  .empty {
+    padding: 2.3rem 1rem;
+    text-align: center;
+    color: var(--muted);
+    border: 1px dashed var(--line-strong);
+    border-radius: var(--radius-md);
+    background: rgba(255, 255, 255, 0.45);
+  }
+
+  .fade-in {
+    animation: rise 500ms ease both;
+  }
+
+  .fade-in.delay-1 { animation-delay: 80ms; }
+  .fade-in.delay-2 { animation-delay: 140ms; }
+  .fade-in.delay-3 { animation-delay: 200ms; }
+
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .fade-in {
+      animation: none;
+    }
+  }
+
+  @media (max-width: 1080px) {
+    .hero,
+    .chart-grid,
+    .split-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .stats-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (max-width: 700px) {
+    .page {
+      width: min(100vw - 1rem, 100%);
+      padding-top: 0.75rem;
+    }
+
+    .hero-main,
+    .hero-side,
+    .stat-card,
+    .section-card {
+      padding: 1.05rem;
+    }
+
+    .hero-meta,
+    .stats-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .list-item {
+      grid-template-columns: 1fr;
+    }
+
+    th,
+    td {
+      padding-left: 0.25rem;
+      padding-right: 0.25rem;
+    }
+  }
 </style>
 </head>
 <body>
-<div class="container">
-  <h1><span>VulnSift</span> Dashboard</h1>
-  <p class="subtitle">Scan history, risk trends, and remediation progress</p>
+<main class="page">
+  <section class="hero">
+    <article class="panel hero-main fade-in">
+      <span class="eyebrow">VulnSift Control Room</span>
+      <h1>Ship fixes, not scanner noise.</h1>
+      <p id="hero-summary">
+        Scan history, risk concentration, and the next best fixes to ship.
+      </p>
+      <div class="hero-meta">
+        <div class="meta-card">
+          <span class="label">Latest source</span>
+          <span class="value mono" id="meta-source">Waiting for data</span>
+        </div>
+        <div class="meta-card">
+          <span class="label">Last stored scan</span>
+          <span class="value" id="meta-timestamp">-</span>
+        </div>
+      </div>
+    </article>
 
-  <div class="grid" id="stats-grid">
-    <div class="card"><h2>Total Scans</h2><div class="stat" id="stat-scans">-</div></div>
-    <div class="card"><h2>Highest Risk</h2><div class="stat red" id="stat-max-risk">-</div></div>
-    <div class="card"><h2>Critical Findings</h2><div class="stat orange" id="stat-critical">-</div></div>
-    <div class="card"><h2>False Positives</h2><div class="stat green" id="stat-fp">-</div></div>
-  </div>
+    <aside class="panel hero-side fade-in delay-1">
+      <div>
+        <h2>Latest scan pulse</h2>
+        <div class="status-tile">
+          <span class="mini-title">Actionable findings</span>
+          <strong id="latest-actionable">0</strong>
+          <div class="delta-row" id="latest-deltas"></div>
+        </div>
+      </div>
 
-  <div class="two-col">
-    <div class="chart-card">
-      <h2>Risk Trend</h2>
-      <canvas id="trend-chart" height="200"></canvas>
-    </div>
-    <div class="chart-card">
-      <h2>Severity Breakdown</h2>
-      <canvas id="severity-chart" height="200"></canvas>
-    </div>
-  </div>
+      <div class="status-tile">
+        <span class="mini-title">Risk bands</span>
+        <div class="delta-row" id="risk-bands"></div>
+      </div>
 
-  <div class="chart-card">
-    <h2>Top Recurring Vulnerabilities</h2>
-    <table id="recurring-table">
-      <thead><tr><th>Rule</th><th>Title</th><th>Occurrences</th><th>Max Risk</th><th>Scans</th></tr></thead>
-      <tbody></tbody>
-    </table>
-  </div>
+      <div class="status-tile">
+        <span class="mini-title">Portfolio size</span>
+        <strong id="total-scans">0</strong>
+        <p class="footnote">Stored scans available for trend analysis and recurring issue tracking.</p>
+      </div>
+    </aside>
+  </section>
 
-  <div class="chart-card">
-    <h2>Scan History</h2>
-    <table id="scans-table">
-      <thead><tr><th>Date</th><th>Source</th><th>Findings</th><th>Actionable</th><th>Max Risk</th><th>FPs</th></tr></thead>
-      <tbody></tbody>
-    </table>
-  </div>
-</div>
+  <section class="stats-grid">
+    <article class="stat-card fade-in delay-1">
+      <span class="section-title">Highest risk</span>
+      <span class="value" id="stat-max-risk">0</span>
+      <p class="sub" id="stat-max-risk-sub">Peak risk in the latest scan.</p>
+    </article>
+
+    <article class="stat-card fade-in delay-1">
+      <span class="section-title">Critical findings</span>
+      <span class="value" id="stat-critical">0</span>
+      <p class="sub" id="stat-critical-sub">Actionable findings scored 7 or higher.</p>
+    </article>
+
+    <article class="stat-card fade-in delay-2">
+      <span class="section-title">False positives</span>
+      <span class="value" id="stat-fp">0</span>
+      <p class="sub" id="stat-fp-sub">Findings filtered out by AI triage in the latest scan.</p>
+    </article>
+
+    <article class="stat-card fade-in delay-2">
+      <span class="section-title">Total findings</span>
+      <span class="value" id="stat-total-findings">0</span>
+      <p class="sub" id="stat-total-findings-sub">Scanner output captured in the latest stored report.</p>
+    </article>
+  </section>
+
+  <section class="chart-grid">
+    <article class="section-card fade-in delay-2">
+      <div class="section-head">
+        <div>
+          <h2 class="section-title">Risk momentum</h2>
+          <p>Max risk and average actionable risk across recent scans.</p>
+        </div>
+      </div>
+      <div class="chart-wrap">
+        <canvas id="trend-chart"></canvas>
+      </div>
+    </article>
+
+    <article class="section-card fade-in delay-3">
+      <div class="section-head">
+        <div>
+          <h2 class="section-title">Latest risk mix</h2>
+          <p>Where the current scan stands across high, medium, low, and false-positive buckets.</p>
+        </div>
+      </div>
+      <div class="chart-wrap">
+        <canvas id="severity-chart"></canvas>
+      </div>
+    </article>
+  </section>
+
+  <section class="split-grid">
+    <article class="section-card fade-in delay-2">
+      <div class="section-head">
+        <div>
+          <h2 class="section-title">Risk hotspots</h2>
+          <p>Files absorbing the most risk in the latest scan.</p>
+        </div>
+      </div>
+      <div class="list" id="hotspots-list"></div>
+    </article>
+
+    <article class="section-card fade-in delay-3">
+      <div class="section-head">
+        <div>
+          <h2 class="section-title">Immediate priorities</h2>
+          <p>The highest-risk actionable findings to tackle next.</p>
+        </div>
+      </div>
+      <div class="list" id="priorities-list"></div>
+    </article>
+  </section>
+
+  <section class="split-grid">
+    <article class="section-card fade-in delay-3">
+      <div class="section-head">
+        <div>
+          <h2 class="section-title">Recurring vulnerabilities</h2>
+          <p>Rules that keep showing up across scans.</p>
+        </div>
+      </div>
+      <table id="recurring-table">
+        <thead>
+          <tr>
+            <th>Rule</th>
+            <th>Title</th>
+            <th>Occurrences</th>
+            <th>Max risk</th>
+            <th>Scans</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </article>
+
+    <article class="section-card fade-in delay-3">
+      <div class="section-head">
+        <div>
+          <h2 class="section-title">Scan history</h2>
+          <p>Recent runs stored in the local VulnSift database.</p>
+        </div>
+      </div>
+      <table id="scans-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Source</th>
+            <th>Findings</th>
+            <th>Actionable</th>
+            <th>Max risk</th>
+            <th>FPs</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </article>
+  </section>
+</main>
 
 <script>
-const COLORS = { accent: '#8b5cf6', red: '#ef4444', orange: '#f97316', green: '#22c55e', muted: '#71717a' };
+const COLORS = {
+  accent: "#0f766e",
+  accentFill: "rgba(15, 118, 110, 0.15)",
+  danger: "#d9485f",
+  dangerFill: "rgba(217, 72, 95, 0.14)",
+  warning: "#d97706",
+  success: "#2f855a",
+  muted: "#61707d",
+  grid: "rgba(24, 32, 43, 0.08)",
+  text: "#18202b",
+};
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function formatDate(value) {
+  if (!value) return "-";
+  return new Date(value).toLocaleString();
+}
+
+function truncate(value, maxLength) {
+  const text = String(value ?? "");
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, Math.max(maxLength - 3, 0))}...`;
+}
+
+function riskClass(score) {
+  if (score >= 7) return "risk-high";
+  if (score >= 4) return "risk-med";
+  return "risk-low";
+}
 
 function riskBadge(score) {
-  const cls = score >= 7 ? 'risk-high' : score >= 4 ? 'risk-med' : 'risk-low';
-  return `<span class="risk-badge ${cls}">${score}</span>`;
+  return `<span class="risk-badge ${riskClass(score)}">${escapeHtml(score)}</span>`;
+}
+
+function deltaClass(delta, negativeIsGood = false) {
+  if (delta === 0) return "delta-flat";
+  const good = negativeIsGood ? delta < 0 : delta > 0;
+  return good ? "delta-good" : "delta-bad";
+}
+
+function signed(delta) {
+  if (delta > 0) return `+${delta}`;
+  return String(delta);
+}
+
+function deltaPill(label, delta, negativeIsGood = false) {
+  return `<span class="delta-pill ${deltaClass(delta, negativeIsGood)}">${escapeHtml(label)} ${escapeHtml(signed(delta))}</span>`;
 }
 
 async function fetchJSON(url) {
-  const res = await fetch(url);
-  return res.json();
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Request failed for ${url}`);
+  }
+  return response.json();
+}
+
+function renderOverview(overview) {
+  const latest = overview.latest_scan;
+  const bands = overview.latest_risk_bands || {};
+  const deltas = overview.deltas || {};
+
+  document.getElementById("total-scans").textContent = overview.total_scans || 0;
+
+  if (!latest) {
+    document.getElementById("hero-summary").textContent =
+      "No scans stored yet. Run `vulnsift store --input report.json` to start building trends.";
+    document.getElementById("latest-deltas").innerHTML =
+      '<span class="delta-pill delta-flat">Waiting for first scan</span>';
+    document.getElementById("risk-bands").innerHTML =
+      '<span class="band-pill band-medium">No findings yet</span>';
+    return;
+  }
+
+  document.getElementById("meta-source").textContent = latest.source_file || "Unknown source";
+  document.getElementById("meta-timestamp").textContent = formatDate(latest.timestamp);
+  document.getElementById("hero-summary").textContent =
+    `Latest scan from ${latest.source_file} surfaced ${latest.actionable_findings} actionable finding(s) with a max risk of ${latest.max_risk}.`;
+
+  document.getElementById("latest-actionable").textContent = latest.actionable_findings;
+  document.getElementById("latest-deltas").innerHTML = [
+    deltaPill("Actionable", deltas.actionable_findings || 0, true),
+    deltaPill("Critical", deltas.critical_findings || 0, true),
+    deltaPill("FPs", deltas.false_positives || 0, false),
+  ].join("");
+
+  document.getElementById("risk-bands").innerHTML = [
+    `<span class="band-pill band-critical">Critical ${escapeHtml(bands.critical || 0)}</span>`,
+    `<span class="band-pill band-medium">Medium ${escapeHtml(bands.medium || 0)}</span>`,
+    `<span class="band-pill band-low">Low ${escapeHtml(bands.low || 0)}</span>`,
+  ].join("");
+
+  document.getElementById("stat-max-risk").textContent = latest.max_risk || 0;
+  document.getElementById("stat-max-risk-sub").textContent =
+    `Delta vs previous scan: ${signed(deltas.max_risk || 0)}.`;
+
+  document.getElementById("stat-critical").textContent = bands.critical || 0;
+  document.getElementById("stat-critical-sub").textContent =
+    `Delta vs previous scan: ${signed(deltas.critical_findings || 0)}.`;
+
+  document.getElementById("stat-fp").textContent = latest.false_positives || 0;
+  document.getElementById("stat-fp-sub").textContent =
+    `Delta vs previous scan: ${signed(deltas.false_positives || 0)}.`;
+
+  document.getElementById("stat-total-findings").textContent = latest.total_findings || 0;
+  document.getElementById("stat-total-findings-sub").textContent =
+    `Delta vs previous scan: ${signed(deltas.total_findings || 0)}.`;
+}
+
+function renderTrendChart(trends) {
+  const ctx = document.getElementById("trend-chart");
+  if (!trends.length) return;
+
+  new Chart(ctx, {
+    type: "line",
+    data: {
+      labels: trends.map((trend) => new Date(trend.timestamp).toLocaleDateString()),
+      datasets: [
+        {
+          label: "Max risk",
+          data: trends.map((trend) => trend.max_risk),
+          borderColor: COLORS.danger,
+          backgroundColor: COLORS.dangerFill,
+          fill: true,
+          tension: 0.35,
+          pointRadius: 3,
+        },
+        {
+          label: "Avg actionable risk",
+          data: trends.map((trend) => trend.avg_risk),
+          borderColor: COLORS.accent,
+          backgroundColor: COLORS.accentFill,
+          fill: true,
+          tension: 0.35,
+          pointRadius: 3,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          labels: {
+            color: COLORS.text,
+            font: { family: "Space Grotesk", size: 12, weight: "700" },
+          },
+        },
+      },
+      scales: {
+        x: {
+          grid: { color: COLORS.grid },
+          ticks: { color: COLORS.muted, font: { family: "IBM Plex Mono", size: 11 } },
+        },
+        y: {
+          beginAtZero: true,
+          max: 10,
+          grid: { color: COLORS.grid },
+          ticks: { color: COLORS.muted, font: { family: "IBM Plex Mono", size: 11 } },
+        },
+      },
+    },
+  });
+}
+
+function renderSeverityChart(overview) {
+  const latest = overview.latest_scan;
+  if (!latest) return;
+  const bands = overview.latest_risk_bands || {};
+
+  new Chart(document.getElementById("severity-chart"), {
+    type: "doughnut",
+    data: {
+      labels: ["Critical", "Medium", "Low", "False positives"],
+      datasets: [
+        {
+          data: [
+            bands.critical || 0,
+            bands.medium || 0,
+            bands.low || 0,
+            latest.false_positives || 0,
+          ],
+          backgroundColor: [COLORS.danger, COLORS.warning, COLORS.success, COLORS.muted],
+          borderWidth: 0,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          position: "bottom",
+          labels: {
+            color: COLORS.text,
+            padding: 14,
+            font: { family: "Space Grotesk", size: 12, weight: "700" },
+          },
+        },
+      },
+      cutout: "68%",
+    },
+  });
+}
+
+function renderHotspots(hotspots) {
+  const container = document.getElementById("hotspots-list");
+  if (!hotspots.length) {
+    container.innerHTML = '<div class="empty">No hotspot data yet.</div>';
+    return;
+  }
+
+  container.innerHTML = hotspots.map((spot) => `
+    <article class="list-item">
+      <div>
+        <strong class="mono">${escapeHtml(truncate(spot.file_path, 60))}</strong>
+        <p>${escapeHtml(spot.finding_count)} finding(s), ${escapeHtml(spot.high_risk_count)} high-risk, avg risk ${escapeHtml(spot.avg_risk)}</p>
+      </div>
+      ${riskBadge(spot.max_risk)}
+    </article>
+  `).join("");
+}
+
+function renderPriorities(priorities) {
+  const container = document.getElementById("priorities-list");
+  if (!priorities.length) {
+    container.innerHTML = '<div class="empty">No actionable priorities yet.</div>';
+    return;
+  }
+
+  container.innerHTML = priorities.map((item) => `
+    <article class="list-item">
+      <div>
+        <strong>${escapeHtml(item.title)}</strong>
+        <p><code>${escapeHtml(item.rule_id)}</code> in <span class="mono">${escapeHtml(truncate(item.file_path, 50))}</span></p>
+        <p>${escapeHtml(item.remediation_title || "Review manually and decide next step.")}</p>
+      </div>
+      ${riskBadge(item.risk_score)}
+    </article>
+  `).join("");
+}
+
+function renderRecurring(recurring) {
+  const tbody = document.querySelector("#recurring-table tbody");
+  if (!recurring.length) {
+    tbody.innerHTML = '<tr><td colspan="5"><div class="empty">No recurring vulnerability data yet.</div></td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = recurring.map((item) => `
+    <tr>
+      <td><code>${escapeHtml(item.rule_id)}</code></td>
+      <td>${escapeHtml(item.title)}</td>
+      <td>${escapeHtml(item.occurrences)}</td>
+      <td>${riskBadge(item.max_risk)}</td>
+      <td>${escapeHtml(item.scan_count)}</td>
+    </tr>
+  `).join("");
+}
+
+function renderScans(scans) {
+  const tbody = document.querySelector("#scans-table tbody");
+  if (!scans.length) {
+    tbody.innerHTML = '<tr><td colspan="6"><div class="empty">No scans yet. Run <code>vulnsift store --input report.json</code> to start tracking history.</div></td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = scans.map((scan) => `
+    <tr>
+      <td>${escapeHtml(formatDate(scan.timestamp))}</td>
+      <td class="mono">${escapeHtml(truncate(scan.source_file, 36))}</td>
+      <td>${escapeHtml(scan.total_findings)}</td>
+      <td>${escapeHtml(scan.actionable_findings)}</td>
+      <td>${riskBadge(scan.max_risk)}</td>
+      <td>${escapeHtml(scan.false_positives)}</td>
+    </tr>
+  `).join("");
 }
 
 async function loadDashboard() {
-  const [scans, trends, recurring, progress] = await Promise.all([
-    fetchJSON('/api/scans'), fetchJSON('/api/trends'),
-    fetchJSON('/api/recurring'), fetchJSON('/api/progress'),
-  ]);
+  try {
+    const [overview, trends, hotspots, priorities, recurring, scans] = await Promise.all([
+      fetchJSON("/api/overview"),
+      fetchJSON("/api/trends"),
+      fetchJSON("/api/hotspots"),
+      fetchJSON("/api/priorities"),
+      fetchJSON("/api/recurring"),
+      fetchJSON("/api/scans"),
+    ]);
 
-  // Stats
-  document.getElementById('stat-scans').textContent = scans.length;
-  document.getElementById('stat-max-risk').textContent = scans.length ? Math.max(...scans.map(s => s.max_risk)) : 0;
-  document.getElementById('stat-critical').textContent = progress.critical || 0;
-  document.getElementById('stat-fp').textContent = progress.false_positives || 0;
-
-  // Trend chart
-  if (trends.length) {
-    new Chart(document.getElementById('trend-chart'), {
-      type: 'line',
-      data: {
-        labels: trends.map(t => new Date(t.timestamp).toLocaleDateString()),
-        datasets: [
-          { label: 'Max Risk', data: trends.map(t => t.max_risk), borderColor: COLORS.red, backgroundColor: 'rgba(239,68,68,0.1)', fill: true, tension: 0.3 },
-          { label: 'Avg Risk', data: trends.map(t => t.avg_risk), borderColor: COLORS.accent, backgroundColor: 'rgba(139,92,246,0.1)', fill: true, tension: 0.3 },
-        ]
-      },
-      options: { responsive: true, scales: { y: { beginAtZero: true, max: 10, grid: { color: '#2a2d3a' }, ticks: { color: '#71717a' } }, x: { grid: { color: '#2a2d3a' }, ticks: { color: '#71717a' } } }, plugins: { legend: { labels: { color: '#e4e4e7' } } } }
-    });
-  }
-
-  // Severity donut
-  new Chart(document.getElementById('severity-chart'), {
-    type: 'doughnut',
-    data: {
-      labels: ['Critical (7-10)', 'Medium (4-6)', 'Low (0-3)', 'False Positives'],
-      datasets: [{ data: [progress.critical || 0, progress.medium || 0, progress.low || 0, progress.false_positives || 0], backgroundColor: [COLORS.red, COLORS.orange, COLORS.green, COLORS.muted] }]
-    },
-    options: { responsive: true, plugins: { legend: { position: 'bottom', labels: { color: '#e4e4e7', padding: 12 } } } }
-  });
-
-  // Recurring table
-  const recurBody = document.querySelector('#recurring-table tbody');
-  if (!recurring.length) {
-    recurBody.innerHTML = '<tr><td colspan="5" class="empty">No data yet</td></tr>';
-  } else {
-    recurBody.innerHTML = recurring.map(r =>
-      `<tr><td><code>${r.rule_id}</code></td><td>${r.title}</td><td>${r.occurrences}</td><td>${riskBadge(r.max_risk)}</td><td>${r.scan_count}</td></tr>`
-    ).join('');
-  }
-
-  // Scans table
-  const scansBody = document.querySelector('#scans-table tbody');
-  if (!scans.length) {
-    scansBody.innerHTML = '<tr><td colspan="6" class="empty">No scans yet. Run <code>vulnsift store --input report.json</code> to add data.</td></tr>';
-  } else {
-    scansBody.innerHTML = scans.map(s =>
-      `<tr><td>${new Date(s.timestamp).toLocaleString()}</td><td>${s.source_file}</td><td>${s.total_findings}</td><td>${s.actionable_findings}</td><td>${riskBadge(s.max_risk)}</td><td>${s.false_positives}</td></tr>`
-    ).join('');
+    renderOverview(overview);
+    renderTrendChart(trends);
+    renderSeverityChart(overview);
+    renderHotspots(hotspots);
+    renderPriorities(priorities);
+    renderRecurring(recurring);
+    renderScans(scans);
+  } catch (error) {
+    document.getElementById("hero-summary").textContent =
+      "The dashboard could not load its data right now. Check the local API routes and database file.";
   }
 }
 

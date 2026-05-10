@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from pydantic import BaseModel, Field
@@ -32,9 +33,13 @@ def find_config(cwd: str | Path | None = None) -> Path | None:
 
 def load_config(cwd: str | Path | None = None) -> VulnSiftConfig:
     """Load config from cwd. Returns defaults if no file found."""
-    import yaml
     path = find_config(cwd)
     if not path:
+        return VulnSiftConfig()
+
+    try:
+        import yaml
+    except ImportError:
         return VulnSiftConfig()
 
     raw = path.read_text(encoding="utf-8")
@@ -51,3 +56,23 @@ def load_config(cwd: str | Path | None = None) -> VulnSiftConfig:
         redact_code=bool(data.get("redact_code", False)),
         gate_threshold=data.get("gate_threshold"),
     )
+
+
+def resolve_anthropic_api_key(cfg: VulnSiftConfig | None = None) -> str | None:
+    """
+    Return API key from ANTHROPIC_API_KEY env, or from api_key_file in config if env is unset/empty.
+    Never logs the key. Returns None if unavailable.
+    """
+    env_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if env_key.strip():
+        return env_key.strip()
+    if cfg and cfg.api_key_file:
+        p = Path(cfg.api_key_file)
+        if not p.is_absolute():
+            p = Path.cwd() / p
+        try:
+            if p.is_file():
+                return p.read_text(encoding="utf-8").strip()
+        except OSError:
+            return None
+    return None

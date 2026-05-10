@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from vulnsift.analytics import get_hotspots, get_priority_findings, summarize_report
 from vulnsift.models import TriageReport
 
 COMMENT_MARKER = "<!-- vulnsift-triage -->"
@@ -19,6 +20,7 @@ def render_github_comment(
     non_fp = [e for e in entries if not e.triage.is_likely_false_positive]
     fp_count = len(entries) - len(non_fp)
     max_risk = max((e.triage.risk_score for e in non_fp), default=0)
+    summary = summarize_report(report)
 
     # Gate status
     if threshold is not None:
@@ -43,6 +45,13 @@ def render_github_comment(
         f"| Highest risk score | {max_risk} |",
         f"| Likely false positives | {fp_count} |",
         f"| Actionable findings | {len(non_fp)} |",
+        f"| Average actionable risk | {summary['average_risk']} |",
+        (
+            f"| Risk distribution | "
+            f"high {summary['risk_bands']['high']} / "
+            f"medium {summary['risk_bands']['medium']} / "
+            f"low {summary['risk_bands']['low']} |"
+        ),
         "",
     ]
 
@@ -73,20 +82,38 @@ def render_github_comment(
         lines.append("</details>")
         lines.append("")
 
+    hotspots = get_hotspots(report, limit=5)
+    if hotspots:
+        lines.append("<details>")
+        lines.append("<summary><strong>Riskiest files</strong></summary>")
+        lines.append("")
+        lines.append("| File | Findings | High risk | Max risk |")
+        lines.append("|------|----------|-----------|----------|")
+        for hotspot in hotspots:
+            lines.append(
+                f"| `{hotspot['file_path']}` | {hotspot['finding_count']} | "
+                f"{hotspot['high_risk_count']} | {hotspot['max_risk']} |"
+            )
+        lines.append("")
+        lines.append("</details>")
+        lines.append("")
+
     # Top remediation actions
     remediation_entries = [e for e in non_fp if e.remediation and e.triage.risk_score >= 4]
     if remediation_entries:
-        sorted_rem = sorted(remediation_entries, key=lambda e: -e.triage.risk_score)
-        top_rem = sorted_rem[:5]
+        top_rem = get_priority_findings(report, limit=5, min_risk=4)
         lines.append("<details>")
-        lines.append("<summary><strong>Recommended actions</strong></summary>")
+        lines.append("<summary><strong>Immediate priorities</strong></summary>")
         lines.append("")
-        for e in top_rem:
-            lines.append(f"- **{e.remediation.title}** (risk {e.triage.risk_score})")
-            for step in e.remediation.steps[:3]:
-                lines.append(f"  - {step}")
-            if len(e.remediation.steps) > 3:
-                lines.append(f"  - *... {len(e.remediation.steps) - 3} more steps*")
+        lines.append("| Risk | Rule | File | Suggested fix |")
+        lines.append("|------|------|------|---------------|")
+        for item in top_rem:
+            line = f":{item['line']}" if item["line"] else ""
+            fix = item["remediation_title"] or "Review manually"
+            lines.append(
+                f"| {item['risk_score']} | `{item['rule_id']}` | "
+                f"`{item['file_path']}{line}` | {fix} |"
+            )
         lines.append("")
         lines.append("</details>")
         lines.append("")

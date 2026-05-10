@@ -5,6 +5,9 @@ from __future__ import annotations
 import sqlite3
 
 from vulnsift.dashboard.db import (
+    get_latest_hotspots,
+    get_latest_priorities,
+    get_overview,
     get_remediation_progress,
     get_risk_trends,
     get_scan_history,
@@ -134,6 +137,45 @@ class TestGetRiskTrends:
         assert len(trends) == 2
 
 
+class TestGetOverview:
+    def test_empty_db(self):
+        conn = _in_memory_db()
+        overview = get_overview(conn)
+        assert overview["total_scans"] == 0
+        assert overview["latest_scan"] is None
+
+    def test_latest_scan_and_deltas(self):
+        conn = _in_memory_db()
+        store_report(conn, _make_report("scan1.sarif"))
+        store_report(
+            conn,
+            _make_report(
+                "scan2.sarif",
+                entries=[
+                    TriageReportEntry(
+                        finding=UnifiedFinding(
+                            id="f9",
+                            rule_id="secret",
+                            title="Hardcoded secret",
+                            severity="high",
+                            location=Location(file_path="settings.py", start_line=8),
+                            source_format="semgrep",
+                        ),
+                        triage=TriageResult(risk_score=8, reasoning="Exposed."),
+                        remediation=RemediationCard(title="Move secret"),
+                    ),
+                ],
+            ),
+        )
+
+        overview = get_overview(conn)
+
+        assert overview["total_scans"] == 2
+        assert overview["latest_scan"]["source_file"] == "scan2.sarif"
+        assert overview["deltas"]["actionable_findings"] == -1
+        assert overview["latest_risk_bands"]["critical"] == 1
+
+
 class TestGetTopRecurring:
     def test_recurring_rules(self):
         conn = _in_memory_db()
@@ -164,3 +206,19 @@ class TestGetRemediationProgress:
         conn = _in_memory_db()
         progress = get_remediation_progress(conn)
         assert progress["total"] == 0
+
+
+class TestLatestViews:
+    def test_latest_hotspots(self):
+        conn = _in_memory_db()
+        store_report(conn, _make_report())
+        hotspots = get_latest_hotspots(conn)
+        assert hotspots
+        assert hotspots[0]["file_path"] == "app.py"
+
+    def test_latest_priorities(self):
+        conn = _in_memory_db()
+        store_report(conn, _make_report())
+        priorities = get_latest_priorities(conn)
+        assert priorities
+        assert priorities[0]["rule_id"] == "sql-injection"

@@ -71,3 +71,25 @@ class TestAutofixCLI:
 
         assert result.exit_code == 0
         assert "no eligible" in result.output.lower()
+
+    def test_list_only_no_api_key(self) -> None:
+        """List-only should not require ANTHROPIC_API_KEY."""
+        import os
+
+        env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "autofix",
+                "--input",
+                str(FIXTURE),
+                "--list-only",
+                "--min-risk",
+                "7",
+            ],
+            env=env,
+        )
+        assert result.exit_code == 0
+        assert "eligible" in result.output.lower()
+        assert "finding-1" in result.output or "sql-injection" in result.output

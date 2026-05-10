@@ -120,6 +120,73 @@ def get_risk_trends(conn: sqlite3.Connection, last_n: int = 20) -> list[dict]:
     return [dict(r) for r in reversed(rows)]
 
 
+def get_overview(conn: sqlite3.Connection) -> dict:
+    """Return latest-scan overview plus simple deltas from the previous scan."""
+    total_scans = conn.execute("SELECT COUNT(*) FROM scans").fetchone()[0]
+    latest_rows = conn.execute(
+        "SELECT * FROM scans ORDER BY timestamp DESC, id DESC LIMIT 2"
+    ).fetchall()
+
+    if not latest_rows:
+        return {
+            "total_scans": 0,
+            "latest_scan": None,
+            "previous_scan": None,
+            "deltas": {
+                "total_findings": 0,
+                "actionable_findings": 0,
+                "max_risk": 0,
+                "false_positives": 0,
+                "critical_findings": 0,
+            },
+            "latest_risk_bands": {"critical": 0, "medium": 0, "low": 0},
+        }
+
+    latest = dict(latest_rows[0])
+    previous = dict(latest_rows[1]) if len(latest_rows) > 1 else None
+
+    latest_risk_bands = conn.execute(
+        """SELECT
+             SUM(CASE WHEN is_fp = 0 AND risk_score >= 7 THEN 1 ELSE 0 END) as critical,
+             SUM(CASE WHEN is_fp = 0 AND risk_score >= 4 AND risk_score < 7 THEN 1 ELSE 0 END) as medium,
+             SUM(CASE WHEN is_fp = 0 AND risk_score < 4 THEN 1 ELSE 0 END) as low
+           FROM findings
+           WHERE scan_id = ?""",
+        (latest["id"],),
+    ).fetchone()
+
+    previous_bands = None
+    if previous is not None:
+        previous_bands = conn.execute(
+            """SELECT
+                 SUM(CASE WHEN is_fp = 0 AND risk_score >= 7 THEN 1 ELSE 0 END) as critical
+               FROM findings
+               WHERE scan_id = ?""",
+            (previous["id"],),
+        ).fetchone()
+
+    deltas = {
+        "total_findings": latest["total_findings"] - (previous["total_findings"] if previous else 0),
+        "actionable_findings": latest["actionable_findings"] - (previous["actionable_findings"] if previous else 0),
+        "max_risk": latest["max_risk"] - (previous["max_risk"] if previous else 0),
+        "false_positives": latest["false_positives"] - (previous["false_positives"] if previous else 0),
+        "critical_findings": (latest_risk_bands["critical"] or 0)
+        - ((previous_bands["critical"] or 0) if previous_bands else 0),
+    }
+
+    return {
+        "total_scans": total_scans,
+        "latest_scan": latest,
+        "previous_scan": previous,
+        "deltas": deltas,
+        "latest_risk_bands": {
+            "critical": latest_risk_bands["critical"] or 0,
+            "medium": latest_risk_bands["medium"] or 0,
+            "low": latest_risk_bands["low"] or 0,
+        },
+    }
+
+
 def get_top_recurring(conn: sqlite3.Connection, limit: int = 10) -> list[dict]:
     """Return the most frequently occurring rule_ids across all scans."""
     rows = conn.execute(
@@ -132,6 +199,53 @@ def get_top_recurring(conn: sqlite3.Connection, limit: int = 10) -> list[dict]:
            ORDER BY occurrences DESC
            LIMIT ?""",
         (limit,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_latest_hotspots(conn: sqlite3.Connection, limit: int = 8) -> list[dict]:
+    """Return the riskiest files from the latest stored scan."""
+    latest_scan = conn.execute("SELECT id FROM scans ORDER BY timestamp DESC, id DESC LIMIT 1").fetchone()
+    if latest_scan is None:
+        return []
+
+    rows = conn.execute(
+        """SELECT
+             file_path,
+             COUNT(*) as finding_count,
+             SUM(CASE WHEN risk_score >= 7 THEN 1 ELSE 0 END) as high_risk_count,
+             MAX(risk_score) as max_risk,
+             ROUND(AVG(risk_score), 1) as avg_risk,
+             SUM(risk_score) as total_risk
+           FROM findings
+           WHERE scan_id = ? AND is_fp = 0
+           GROUP BY file_path
+           ORDER BY total_risk DESC, max_risk DESC, finding_count DESC, file_path ASC
+           LIMIT ?""",
+        (latest_scan["id"], limit),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_latest_priorities(conn: sqlite3.Connection, limit: int = 8) -> list[dict]:
+    """Return the highest-risk actionable findings from the latest scan."""
+    latest_scan = conn.execute("SELECT id FROM scans ORDER BY timestamp DESC, id DESC LIMIT 1").fetchone()
+    if latest_scan is None:
+        return []
+
+    rows = conn.execute(
+        """SELECT
+             finding_id,
+             rule_id,
+             title,
+             risk_score,
+             file_path,
+             remediation_title
+           FROM findings
+           WHERE scan_id = ? AND is_fp = 0
+           ORDER BY risk_score DESC, file_path ASC, rule_id ASC
+           LIMIT ?""",
+        (latest_scan["id"], limit),
     ).fetchall()
     return [dict(r) for r in rows]
 
