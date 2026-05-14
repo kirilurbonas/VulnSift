@@ -5,6 +5,7 @@ from __future__ import annotations
 from html import escape
 
 from vulnsift.analytics import compare_reports, get_backlog_items, get_hotspots, summarize_report
+from vulnsift.codeowners import CodeownersRule, annotate_backlog_owners, summarize_by_owner
 from vulnsift.models import TriageReport
 
 
@@ -14,11 +15,20 @@ def render_html_report(
     baseline: TriageReport | None = None,
     title: str | None = None,
     top_n: int = 10,
+    owner_rules: list[CodeownersRule] | None = None,
+    unowned_label: str = "(unowned)",
 ) -> str:
     """Render a standalone HTML artifact for sharing triage results."""
     summary = summarize_report(report)
     hotspots = get_hotspots(report, limit=top_n)
     backlog = get_backlog_items(report, limit=top_n, min_risk=4)
+    if owner_rules:
+        backlog = annotate_backlog_owners(backlog, owner_rules, unowned_label=unowned_label)
+    owner_summary = (
+        summarize_by_owner(report, owner_rules, min_risk=0, limit=top_n, unowned_label=unowned_label)
+        if owner_rules
+        else []
+    )
     comparison = compare_reports(report, baseline) if baseline is not None else None
 
     page_title = title or "VulnSift Report"
@@ -63,6 +73,20 @@ def render_html_report(
           {new_findings_html}
           {resolved_findings_html}
           {escalated_findings_html}
+        </section>
+        """
+
+    owner_summary_html = ""
+    if owner_summary:
+        owner_summary_html = f"""
+        <section class="panel">
+          <div class="section-head">
+            <div>
+              <h2>Owner Rollup</h2>
+              <p>Actionable risk grouped by CODEOWNERS ownership.</p>
+            </div>
+          </div>
+          {_render_owner_summary_table(owner_summary)}
         </section>
         """
 
@@ -296,6 +320,8 @@ def render_html_report(
       </section>
     </section>
 
+    {owner_summary_html}
+
     {comparison_html}
 
     <p class="footer">
@@ -335,16 +361,18 @@ def _render_backlog_table(backlog: list[dict[str, object]]) -> str:
     rows = []
     for item in backlog:
         line = f":{item['line']}" if item["line"] else ""
+        owners = escape(str(item.get("owners", ""))) if item.get("owners") else "-"
         rows.append(
             "<tr>"
             f"<td>{_risk_badge(int(item['risk_score']))}</td>"
             f"<td><code>{escape(str(item['rule_id']))}</code><br>{escape(str(item['title']))}</td>"
             f"<td><code>{escape(str(item['file_path']))}{escape(line)}</code></td>"
+            f"<td>{owners}</td>"
             f"<td>{escape(str(item['remediation_title'] or 'Review manually'))}</td>"
             "</tr>"
         )
     return (
-        "<table><thead><tr><th>Risk</th><th>Finding</th><th>Location</th><th>Suggested fix</th></tr>"
+        "<table><thead><tr><th>Risk</th><th>Finding</th><th>Location</th><th>Owners</th><th>Suggested fix</th></tr>"
         "</thead><tbody>"
         + "".join(rows)
         + "</tbody></table>"
@@ -392,6 +420,28 @@ def _render_delta_table(title: str, items: list[dict[str, object]], empty_messag
         "<table><thead><tr><th>Delta</th><th>Current risk</th><th>Rule</th><th>Location</th></tr></thead><tbody>"
         + "".join(rows)
         + "</tbody></table></section>"
+    )
+
+
+def _render_owner_summary_table(rows: list[dict[str, object]]) -> str:
+    if not rows:
+        return '<p class="empty">No owner summary data available.</p>'
+    body = []
+    for row in rows:
+        body.append(
+            "<tr>"
+            f"<td>{escape(str(row['owners']))}</td>"
+            f"<td>{escape(str(row['finding_count']))}</td>"
+            f"<td>{escape(str(row['high_risk_count']))}</td>"
+            f"<td>{_risk_badge(int(row['max_risk']))}</td>"
+            f"<td>{escape(', '.join(str(item) for item in row['top_files']) or '-')}</td>"
+            "</tr>"
+        )
+    return (
+        "<table><thead><tr><th>Owners</th><th>Findings</th><th>High risk</th>"
+        "<th>Max risk</th><th>Top files</th></tr></thead><tbody>"
+        + "".join(body)
+        + "</tbody></table>"
     )
 
 

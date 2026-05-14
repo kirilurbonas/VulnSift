@@ -17,6 +17,7 @@ from rich.console import Console
 
 from vulnsift import __version__
 from vulnsift.analytics import compare_reports
+from vulnsift.codeowners import load_codeowners
 from vulnsift.config import VulnSiftConfig, load_config, resolve_anthropic_api_key
 from vulnsift.models import TriageReport, TriageReportEntry, TriageResult
 from vulnsift.output import (
@@ -24,6 +25,8 @@ from vulnsift.output import (
     render_backlog,
     render_comparison_summary,
     render_html_report,
+    render_owner_summary,
+    render_owner_summary_table,
     render_remediation_cards,
     render_remediation_cards_single,
     render_report_insights,
@@ -67,6 +70,25 @@ def _load_triage_report(path_like: str) -> TriageReport:
     except Exception as e:
         _err_with_hint(str(e), "Tip: generate with `vulnsift triage --input <scan> --export json`.")
     raise AssertionError("unreachable")
+
+
+def _load_codeowners_rules(
+    path_like: str | None,
+    *,
+    required: bool = False,
+) -> tuple[list, Path | None]:
+    try:
+        rules, resolved = load_codeowners(path_like, cwd=Path.cwd())
+    except FileNotFoundError as e:
+        _err_with_hint(str(e), "Provide --codeowners <path> or add a standard CODEOWNERS file to the repo.")
+
+    if required and resolved is None:
+        _err_with_hint(
+            "Could not find a CODEOWNERS file.",
+            "Add .github/CODEOWNERS, CODEOWNERS, or pass --codeowners <path>.",
+        )
+
+    return rules, resolved
 
 
 @click.group(
@@ -401,16 +423,47 @@ Examples:
 @click.option("--output", "output_path", required=True, type=click.Path(), help="HTML file to write.")
 @click.option("--title", default=None, help="Optional page title for the shared report.")
 @click.option("--top", type=int, default=10, show_default=True, help="How many hotspots and findings to display.")
-def share(input_path: str, baseline_path: str | None, output_path: str, title: str | None, top: int) -> None:
+@click.option(
+    "--codeowners",
+    "codeowners_path",
+    type=click.Path(exists=True),
+    default=None,
+    help="Optional CODEOWNERS file to add owner rollups to the report.",
+)
+@click.option(
+    "--unowned-label",
+    default="(unowned)",
+    show_default=True,
+    help="Label to use when no CODEOWNERS rule matches a finding.",
+)
+def share(
+    input_path: str,
+    baseline_path: str | None,
+    output_path: str,
+    title: str | None,
+    top: int,
+    codeowners_path: str | None,
+    unowned_label: str,
+) -> None:
     """Write a standalone HTML report artifact for sharing triage results."""
     report_obj = _load_triage_report(input_path)
     baseline_report = _load_triage_report(baseline_path) if baseline_path else None
+    owner_rules, owner_source = _load_codeowners_rules(codeowners_path, required=False)
 
-    html = render_html_report(report_obj, baseline=baseline_report, title=title, top_n=top)
+    html = render_html_report(
+        report_obj,
+        baseline=baseline_report,
+        title=title,
+        top_n=top,
+        owner_rules=owner_rules or None,
+        unowned_label=unowned_label,
+    )
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(html, encoding="utf-8")
     console.print(f"[green]Wrote standalone HTML report to {output}[/]")
+    if owner_source is not None:
+        console.print(f"[dim]Included CODEOWNERS ownership from {owner_source}[/]")
 
 
 @main.command(
@@ -432,21 +485,124 @@ Examples:
 @click.option("--output", "output_path", type=click.Path(), default=None, help="Optional file path to write.")
 @click.option("--min-risk", type=float, default=4.0, show_default=True, help="Minimum risk score to include.")
 @click.option("--top", type=int, default=25, show_default=True, help="How many backlog items to include.")
+@click.option(
+    "--codeowners",
+    "codeowners_path",
+    type=click.Path(exists=True),
+    default=None,
+    help="Optional CODEOWNERS file to annotate backlog items with owners.",
+)
+@click.option(
+    "--unowned-label",
+    default="(unowned)",
+    show_default=True,
+    help="Label to use when no CODEOWNERS rule matches a finding.",
+)
 def backlog(
     input_path: str,
     export_format: str,
     output_path: str | None,
     min_risk: float,
     top: int,
+    codeowners_path: str | None,
+    unowned_label: str,
 ) -> None:
     """Export a prioritized remediation backlog from a triage report."""
     report_obj = _load_triage_report(input_path)
-    rendered = render_backlog(report_obj, export_format=export_format, top=top, min_risk=min_risk)
+    owner_rules, owner_source = _load_codeowners_rules(codeowners_path, required=False)
+    rendered = render_backlog(
+        report_obj,
+        export_format=export_format,
+        top=top,
+        min_risk=min_risk,
+        owner_rules=owner_rules or None,
+        unowned_label=unowned_label,
+    )
     if output_path:
         output = Path(output_path)
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(rendered, encoding="utf-8")
         console.print(f"[green]Wrote prioritized backlog to {output}[/]")
+        if owner_source is not None:
+            console.print(f"[dim]Annotated backlog with CODEOWNERS from {owner_source}[/]")
+    else:
+        click.echo(rendered)
+
+
+@main.command(
+    epilog="""
+Examples:
+  vulnsift owners --input ./out/triage-report.json
+  vulnsift owners --input ./out/triage-report.json --format csv --output ./out/owners.csv
+""",
+)
+@click.option("--input", "input_path", required=True, type=click.Path(exists=True), help="Triage report JSON file.")
+@click.option(
+    "--codeowners",
+    "codeowners_path",
+    type=click.Path(exists=True),
+    default=None,
+    help="CODEOWNERS file to use. Defaults to the standard repo locations if omitted.",
+)
+@click.option(
+    "--format",
+    "export_format",
+    type=click.Choice(["table", "json", "csv", "md"]),
+    default="table",
+    show_default=True,
+    help="Owner summary output format.",
+)
+@click.option("--output", "output_path", type=click.Path(), default=None, help="Optional file path to write.")
+@click.option("--min-risk", type=float, default=0.0, show_default=True, help="Minimum risk score to include.")
+@click.option("--top", type=int, default=15, show_default=True, help="How many owner rows to include.")
+@click.option(
+    "--unowned-label",
+    default="(unowned)",
+    show_default=True,
+    help="Label to use when no CODEOWNERS rule matches a finding.",
+)
+def owners(
+    input_path: str,
+    codeowners_path: str | None,
+    export_format: str,
+    output_path: str | None,
+    min_risk: float,
+    top: int,
+    unowned_label: str,
+) -> None:
+    """Summarize actionable findings by CODEOWNERS ownership."""
+    report_obj = _load_triage_report(input_path)
+    rules, resolved = _load_codeowners_rules(codeowners_path, required=True)
+    assert resolved is not None
+
+    if output_path and export_format == "table":
+        _err_with_hint("The 'table' format writes to stdout only.", "Use --format csv|json|md with --output.")
+
+    if export_format == "table":
+        console.print(f"[dim]Using CODEOWNERS from {resolved}[/]")
+        render_owner_summary_table(
+            report_obj,
+            rules,
+            top_n=top,
+            min_risk=min_risk,
+            unowned_label=unowned_label,
+            console=console,
+        )
+        return
+
+    rendered = render_owner_summary(
+        report_obj,
+        rules,
+        export_format=export_format,
+        min_risk=min_risk,
+        top=top,
+        unowned_label=unowned_label,
+    )
+    if output_path:
+        output = Path(output_path)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(rendered, encoding="utf-8")
+        console.print(f"[green]Wrote owner summary to {output}[/]")
     else:
         click.echo(rendered)
 

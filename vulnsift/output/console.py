@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from vulnsift.analytics import get_hotspots, get_priority_findings, summarize_report
+from vulnsift.codeowners import CodeownersRule, summarize_by_owner
 from vulnsift.models import TriageReport
 
 try:
@@ -198,6 +199,50 @@ def render_comparison_summary(
                 _truncate(f"{item['file_path']}{line}", 42),
             )
         cons.print(table)
+
+
+def render_owner_summary_table(
+    report: TriageReport,
+    rules: list[CodeownersRule],
+    *,
+    top_n: int = 10,
+    min_risk: float = 0,
+    unowned_label: str = "(unowned)",
+    console: Console | None = None,
+) -> None:
+    """Render owner rollups from CODEOWNERS."""
+    if Console is None or Table is None:
+        return
+
+    cons = console or Console()
+    rows = summarize_by_owner(
+        report,
+        rules,
+        min_risk=min_risk,
+        limit=top_n,
+        unowned_label=unowned_label,
+    )
+    if not rows:
+        cons.print("[dim]No actionable findings matched the owner summary filters.[/]")
+        return
+
+    table = Table(title="Owner Summary", show_header=True, header_style="bold")
+    table.add_column("Owners", max_width=34)
+    table.add_column("Findings", justify="right")
+    table.add_column("High", justify="right")
+    table.add_column("Max", justify="right")
+    table.add_column("Avg", justify="right")
+    table.add_column("Top Files", max_width=40)
+    for row in rows:
+        table.add_row(
+            _truncate(str(row["owners"]), 34),
+            str(row["finding_count"]),
+            str(row["high_risk_count"]),
+            _risk_markup(int(row["max_risk"])),
+            str(row["avg_risk"]),
+            _truncate(", ".join(str(item) for item in row["top_files"]) or "-", 40),
+        )
+    cons.print(table)
 
 
 def progress_spinner(console: Console | None = None):

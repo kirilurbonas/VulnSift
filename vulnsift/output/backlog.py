@@ -8,6 +8,7 @@ from io import StringIO
 from pathlib import Path
 
 from vulnsift.analytics import get_backlog_items
+from vulnsift.codeowners import CodeownersRule, annotate_backlog_owners
 from vulnsift.models import TriageReport
 
 
@@ -17,9 +18,17 @@ def render_backlog(
     export_format: str = "csv",
     top: int | None = None,
     min_risk: float = 4,
+    owner_rules: list[CodeownersRule] | None = None,
+    unowned_label: str = "(unowned)",
 ) -> str:
     """Render a prioritized backlog in CSV, JSON, or Markdown."""
-    rows = _build_rows(report, top=top, min_risk=min_risk)
+    rows = _build_rows(
+        report,
+        top=top,
+        min_risk=min_risk,
+        owner_rules=owner_rules,
+        unowned_label=unowned_label,
+    )
     if export_format == "csv":
         return _render_csv(rows)
     if export_format == "json":
@@ -36,18 +45,34 @@ def write_backlog(
     export_format: str = "csv",
     top: int | None = None,
     min_risk: float = 4,
+    owner_rules: list[CodeownersRule] | None = None,
+    unowned_label: str = "(unowned)",
 ) -> Path:
     """Write a prioritized backlog file and return the path."""
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(
-        render_backlog(report, export_format=export_format, top=top, min_risk=min_risk),
+        render_backlog(
+            report,
+            export_format=export_format,
+            top=top,
+            min_risk=min_risk,
+            owner_rules=owner_rules,
+            unowned_label=unowned_label,
+        ),
         encoding="utf-8",
     )
     return output
 
 
-def _build_rows(report: TriageReport, *, top: int | None, min_risk: float) -> list[dict[str, object]]:
+def _build_rows(
+    report: TriageReport,
+    *,
+    top: int | None,
+    min_risk: float,
+    owner_rules: list[CodeownersRule] | None,
+    unowned_label: str,
+) -> list[dict[str, object]]:
     items = get_backlog_items(report, limit=top, min_risk=min_risk)
     rows: list[dict[str, object]] = []
     for rank, item in enumerate(items, 1):
@@ -71,6 +96,8 @@ def _build_rows(report: TriageReport, *, top: int | None, min_risk: float) -> li
                 "reference_links": " | ".join(item["references"]),
             }
         )
+    if owner_rules:
+        rows = annotate_backlog_owners(rows, owner_rules, unowned_label=unowned_label)
     return rows
 
 
@@ -79,6 +106,7 @@ def _render_csv(rows: list[dict[str, object]]) -> str:
     fieldnames = [
         "rank",
         "risk_score",
+        "owners",
         "rule_id",
         "finding_id",
         "title",
@@ -104,15 +132,15 @@ def _render_markdown(rows: list[dict[str, object]]) -> str:
     lines = [
         "# VulnSift prioritized backlog",
         "",
-        "| Rank | Risk | Rule | File | Suggested fix |",
-        "|------|------|------|------|---------------|",
+        "| Rank | Risk | Owners | Rule | File | Suggested fix |",
+        "|------|------|--------|------|------|---------------|",
     ]
     for row in rows:
         line = f":{row['line']}" if row["line"] else ""
         lines.append(
-            f"| {row['rank']} | {row['risk_score']} | `{row['rule_id']}` | "
+            f"| {row['rank']} | {row['risk_score']} | {row.get('owners', '') or '-'} | `{row['rule_id']}` | "
             f"`{row['file_path']}{line}` | {row['remediation_title'] or 'Review manually'} |"
         )
     if not rows:
-        lines.append("| - | - | - | - | No actionable findings at this threshold |")
+        lines.append("| - | - | - | - | - | No actionable findings at this threshold |")
     return "\n".join(lines) + "\n"

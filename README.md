@@ -46,6 +46,7 @@ Use `validate` and `triage --dry-run` to parse and inspect without the API. Real
 - **Baseline compare**: `vulnsift compare` and `vulnsift report --baseline ...` show new, resolved, and escalating findings between scans.
 - **Shareable artifacts**: `vulnsift share` writes a standalone HTML report you can upload as a CI artifact or circulate internally.
 - **Prioritized backlog**: `vulnsift backlog` exports remediation work as CSV, JSON, or Markdown for tickets and planning.
+- **Owner-aware triage**: `vulnsift owners` and optional `--codeowners` support roll findings up by team ownership and annotate backlog/report exports.
 - **Auto-fix**: Patches for high-risk findings; `--dry-run`, `--list-only`, `--max-fixes`, optional `--open-pr` (requires `gh`).
 - **GitHub Action**: PR comment with risk summary and optional gate.
 - **Web dashboard** (optional extra): Store reports and view latest scan health, hotspots, priorities, and trends (`vulnsift[dashboard]`).
@@ -66,7 +67,7 @@ Use `validate` and `triage --dry-run` to parse and inspect without the API. Real
 | `autofix` | Yes (per eligible file) | Finding context plus **full contents** of each affected source file (up to an internal size cap). |
 | `autofix --dry-run` | Yes | Same as `autofix`; only file writes / PRs are skipped. |
 | `autofix --list-only` | No | Reads triage JSON only; prints eligible paths. |
-| `github-comment`, `store`, `report`, `compare`, `share`, `backlog` | No | Local JSON / DB only. |
+| `github-comment`, `store`, `report`, `compare`, `share`, `backlog`, `owners` | No | Local JSON / DB only. |
 
 Run `vulnsift --help` for **exit codes** (0 = success, 1 = error, 2 = triage gate failed).
 
@@ -119,7 +120,11 @@ vulnsift compare --current ./out/triage-report.json --baseline ./out/previous-tr
 vulnsift share --input ./out/triage-report.json --output ./out/triage-report.html
 vulnsift backlog --input ./out/triage-report.json --format csv --output ./out/backlog.csv
 
-# 6) Optional: CI-friendly gate + cache (reuse triage when inputs unchanged)
+# 6) Add ownership using CODEOWNERS for planning and assignment
+vulnsift owners --input ./out/triage-report.json
+vulnsift backlog --input ./out/triage-report.json --format csv --codeowners .github/CODEOWNERS
+
+# 7) Optional: CI-friendly gate + cache (reuse triage when inputs unchanged)
 vulnsift triage --input scan.sarif --export json --gate-threshold 7 --cache .vulnsift/triage-cache.json
 ```
 
@@ -164,6 +169,14 @@ vulnsift share --input ./out/triage-report.json --baseline ./out/main-branch.jso
 ```bash
 vulnsift backlog --input ./out/triage-report.json --format csv --output ./out/backlog.csv
 vulnsift backlog --input ./out/triage-report.json --format md --top 15
+vulnsift backlog --input ./out/triage-report.json --format csv --codeowners .github/CODEOWNERS
+```
+
+### Usage: owners
+
+```bash
+vulnsift owners --input ./out/triage-report.json
+vulnsift owners --input ./out/triage-report.json --format csv --output ./out/owners.csv
 ```
 
 ## Commands
@@ -174,8 +187,9 @@ vulnsift backlog --input ./out/triage-report.json --format md --top 15
 | `validate` | Parse a scan (SARIF, Snyk, Semgrep, Trivy; `--format auto`) without the API. |
 | `report` | Print summary from `triage-report.json`, including hotspots and immediate priorities. |
 | `compare` | Compare two triage reports to show new, resolved, and escalating findings; optional regression gate. |
-| `share` | Write a standalone HTML artifact from a triage report, with optional baseline comparison. |
-| `backlog` | Export prioritized remediation work as CSV, JSON, or Markdown. |
+| `share` | Write a standalone HTML artifact from a triage report, with optional baseline comparison and CODEOWNERS ownership rollups. |
+| `backlog` | Export prioritized remediation work as CSV, JSON, or Markdown; optional CODEOWNERS annotation. |
+| `owners` | Summarize actionable risk by CODEOWNERS ownership for triage and assignment. |
 | `autofix` | Generate patches from a triage JSON. `--list-only` lists eligible items without API calls. |
 | `github-comment` | Render PR comment Markdown from a triage report (used by the GitHub Action). |
 | `store` | Append a triage report into the dashboard SQLite DB. |
@@ -330,6 +344,13 @@ To make the results easy to circulate, also emit an HTML report and backlog arti
 ```bash
 vulnsift share --input vulnsift-out/triage-report.json --output vulnsift-out/triage-report.html
 vulnsift backlog --input vulnsift-out/triage-report.json --format csv --output vulnsift-out/backlog.csv
+```
+
+If your repo has a `CODEOWNERS` file, annotate ownership in those artifacts too:
+
+```bash
+vulnsift owners --input vulnsift-out/triage-report.json --format csv --output vulnsift-out/owners.csv
+vulnsift share --input vulnsift-out/triage-report.json --output vulnsift-out/triage-report.html --codeowners .github/CODEOWNERS
 ```
 
 ## FAQ / Gotchas

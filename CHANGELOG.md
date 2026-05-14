@@ -12,6 +12,7 @@ All notable changes to VulnSift are documented here. The project follows [Semant
 - **Baseline compare**: `vulnsift compare` shows new, resolved, and escalating findings between reports; optional `--fail-on-new-risk` exits 2 for regression gating.
 - **Shareable HTML artifacts**: `vulnsift share` writes standalone triage or comparison reports for CI artifacts and internal distribution.
 - **Backlog export**: `vulnsift backlog` exports prioritized remediation work as CSV, JSON, or Markdown for tickets and planning.
+- **CODEOWNERS ownership planning**: `vulnsift owners` summarizes actionable risk by team ownership, while `share` and `backlog` can annotate outputs with owners.
 - **GitHub Action**: Reusable workflow for PR triage and comments.
 - **Parsers**: Semgrep and Trivy JSON; `--format auto` for triage and validate.
 - **Config**: `vulnsift.yaml` / `.vulnsift.yaml` with `project_context`, `output_dir`, `api_key_file`, `redact_code`, `gate_threshold`. **`api_key_file`** is read when `ANTHROPIC_API_KEY` is unset.
@@ -28,6 +29,7 @@ All notable changes to VulnSift are documented here. The project follows [Semant
 - Default `--format` for `triage` and `validate` is `auto`.
 - `vulnsift report` now surfaces hotspots, immediate priorities, and optional `--baseline` comparison output.
 - Shared analytics now also power standalone HTML report output and backlog exports so prioritization stays consistent across CLI workflows.
+- Ownership-aware planning now understands common CODEOWNERS path prefixes and globs so remediation exports can be assigned directly.
 - **Dashboard UI**: redesigned around latest scan pulse, file hotspots, immediate priorities, recurring rules, and trend charts.
 - **GitHub comments**: include average actionable risk, riskiest files, and immediate priorities.
 - **CI**: Installs `.[dashboard,dotenv]` so dashboard tests run with Flask present.

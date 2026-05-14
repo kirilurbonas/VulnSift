@@ -258,6 +258,94 @@ def test_backlog_command_markdown_stdout(tmp_path: Path) -> None:
     assert "sqli" in result.output
 
 
+def test_backlog_command_with_codeowners_includes_owners(tmp_path: Path) -> None:
+    report = _report(
+        _entry(finding_id="f1", rule_id="sqli", file_path="src/api/app.py", risk_score=9),
+        source_file="report.json",
+    )
+    report_path = tmp_path / "report.json"
+    codeowners_path = tmp_path / "CODEOWNERS"
+    report_path.write_text(report.model_dump_json(), encoding="utf-8")
+    codeowners_path.write_text("src/api/ @backend\n", encoding="utf-8")
+
+    result = runner.invoke(
+        main,
+        [
+            "backlog",
+            "--input",
+            str(report_path),
+            "--format",
+            "csv",
+            "--codeowners",
+            str(codeowners_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "owners" in result.output.lower()
+    assert "@backend" in result.output
+
+
+def test_share_command_with_codeowners_includes_owner_rollup(tmp_path: Path) -> None:
+    report = _report(
+        _entry(finding_id="f1", rule_id="sqli", file_path="src/api/app.py", risk_score=9),
+        source_file="report.json",
+    )
+    report_path = tmp_path / "report.json"
+    output_path = tmp_path / "report.html"
+    codeowners_path = tmp_path / "CODEOWNERS"
+    report_path.write_text(report.model_dump_json(), encoding="utf-8")
+    codeowners_path.write_text("src/api/ @backend\n", encoding="utf-8")
+
+    result = runner.invoke(
+        main,
+        [
+            "share",
+            "--input",
+            str(report_path),
+            "--output",
+            str(output_path),
+            "--codeowners",
+            str(codeowners_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    html = output_path.read_text(encoding="utf-8")
+    assert "Owner Rollup" in html
+    assert "@backend" in html
+
+
+def test_owners_command_outputs_table(tmp_path: Path) -> None:
+    report = _report(
+        _entry(finding_id="f1", rule_id="sqli", file_path="src/api/app.py", risk_score=9),
+        _entry(finding_id="f2", rule_id="xss", file_path="src/web/page.py", risk_score=5),
+        source_file="report.json",
+    )
+    report_path = tmp_path / "report.json"
+    codeowners_path = tmp_path / "CODEOWNERS"
+    report_path.write_text(report.model_dump_json(), encoding="utf-8")
+    codeowners_path.write_text("src/api/ @backend\nsrc/web/ @frontend\n", encoding="utf-8")
+
+    result = runner.invoke(
+        main,
+        [
+            "owners",
+            "--input",
+            str(report_path),
+            "--codeowners",
+            str(codeowners_path),
+            "--format",
+            "table",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Owner Summary" in result.output
+    assert "@backend" in result.output
+    assert "@frontend" in result.output
+
+
 def test_version() -> None:
     result = runner.invoke(main, ["--version"])
     assert result.exit_code == 0
