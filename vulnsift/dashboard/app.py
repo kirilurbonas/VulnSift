@@ -211,8 +211,10 @@ def create_app(db_path: Path | str | None = None, *, token: str | None = None) -
                 limit=arg_int("limit", 50),
                 offset=arg_int("offset", 0, lo=0, hi=sys.maxsize),
             )
-        except ValueError as exc:
-            return _json_error(str(exc), 400)
+        except ValueError:
+            # Fixed message: never echo exception text back to clients.
+            return _json_error("invalid filter: use band=high|medium|low|all, status=actionable|fp|error|all, "
+                               "sort=risk|file|rule", 400)
         return jsonify(result)
 
     @app.get("/api/findings/<int:finding_id>")

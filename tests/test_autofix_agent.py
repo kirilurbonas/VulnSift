@@ -347,13 +347,13 @@ class TestAutofixReport:
     @pytest.mark.skipif(sys.platform == "win32", reason="POSIX modes")
     def test_preserves_mode_and_crlf(self, mock_call, tmp_path: Path):
         src = _write(tmp_path, "src/app.py", SOURCE.replace("\n", "\r\n"))
-        os.chmod(src, 0o755)
+        os.chmod(src, 0o750)
         results = autofix_report(TriageReport(entries=[_make_entry()]), tmp_path, client=MagicMock())
         assert results[0].applied is True
         data = src.read_bytes()
         assert FIXED_LINE.encode() in data
         assert data.count(b"\r\n") == data.count(b"\n")  # every line ending still CRLF
-        assert stat.S_IMODE(src.stat().st_mode) == 0o755
+        assert stat.S_IMODE(src.stat().st_mode) == 0o750
         assert "\r" not in results[0].diff
 
     def test_second_fix_same_file_sees_first(self, mock_call, tmp_path: Path):

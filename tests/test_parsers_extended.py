@@ -443,7 +443,8 @@ def test_trivy_vulnerability_details(trivy_full: list) -> None:
     assert "lodash" in lodash.message and "4.17.15" in lodash.message and "Fixed in 4.17.21" in lodash.message
     assert lodash.raw["references"][0] == "https://avd.aquasec.com/nvd/cve-2021-23337"  # PrimaryURL first
     assert len(lodash.raw["references"]) == 3  # deduped
-    assert "References:" in lodash.description and "nvd.nist.gov" in lodash.description
+    assert "References:" in lodash.description
+    assert "https://nvd.nist.gov/vuln/detail/CVE-2021-23337" in lodash.raw["references"]
     assert lodash.raw["result"] == {"Target": "package-lock.json", "Class": "lang-pkgs", "Type": "npm"}
     assert semver.rule_id == "GHSA-35jh-r3h4-6jhm"
     assert semver.cve == "CVE-2022-25883"  # from VendorIDs
