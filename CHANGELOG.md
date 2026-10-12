@@ -35,7 +35,14 @@ All notable changes to VulnSift are documented here. The project follows [Semant
 - Uses the Anthropic Python SDK 1.x with structured outputs; the default model is `claude-opus-5-5`.
 - `PROMPT_VERSION` 2.0 (hardened against prompt injection from scanned code); report `schema_version` 1.1.
 - GitHub Action installs VulnSift from the action itself, passes inputs via environment variables (no `eval`), paginates comment lookup, and adds `model`, `concurrency`, `output-dir`, `export-sarif` and `fail-on-error` inputs.
-- Packaging moved to PEP 621 metadata; `dev` extra; CI tests Python 3.11–3.13 and macOS with coverage; releases use PyPI trusted publishing after tests pass.
+- Packaging moved to PEP 621 metadata with a `dev` extra and a `py.typed` marker.
+
+### Project / SDLC
+
+- CI: ruff + mypy, tests on Linux/macOS/Windows and Python 3.11–3.14 with an 85% coverage gate, `pip-audit`, dependency review on PRs, a wheel smoke test, and CodeQL (Python, JavaScript, Actions).
+- All GitHub Actions pinned to commit SHAs with least-privilege permissions, non-persisted checkout credentials and timeouts; Dependabot (with a cooldown) keeps them and Python dependencies current.
+- Releases: run tests, verify the tag matches the version, attest build provenance, publish with PyPI trusted publishing, and create the GitHub release.
+- Added `SECURITY.md`, `CODE_OF_CONDUCT.md`, `CODEOWNERS`, issue and PR templates, `.editorconfig` and a pre-commit configuration. The example workflow moved to `examples/` so it no longer runs in this repository.
 
 ## [0.2.0]
 

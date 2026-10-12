@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import json
 from io import StringIO
+from typing import Any
 
 from vulnsift.codeowners import CodeownersRule, summarize_by_owner
 from vulnsift.models import TriageReport
@@ -37,7 +38,7 @@ def render_owner_summary(
     raise ValueError(f"Unsupported owner export format: {export_format}")
 
 
-def _render_csv(rows: list[dict[str, object]]) -> str:
+def _render_csv(rows: list[dict[str, Any]]) -> str:
     buffer = StringIO()
     fieldnames = [
         "owners",
@@ -61,7 +62,7 @@ def _render_csv(rows: list[dict[str, object]]) -> str:
     return buffer.getvalue()
 
 
-def _render_markdown(rows: list[dict[str, object]]) -> str:
+def _render_markdown(rows: list[dict[str, Any]]) -> str:
     lines = [
         "# VulnSift owner summary",
         "",

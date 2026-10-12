@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path, PurePosixPath
+from typing import Any
 
 from vulnsift.analytics import get_backlog_items
 from vulnsift.models import HIGH_RISK_THRESHOLD, TriageReport
@@ -98,10 +99,10 @@ def summarize_by_owner(
     min_risk: float = 0,
     limit: int | None = None,
     unowned_label: str = "(unowned)",
-) -> list[dict[str, object]]:
+) -> list[dict[str, Any]]:
     """Group actionable findings by owner set."""
     items = get_backlog_items(report, limit=None, min_risk=min_risk)
-    grouped: dict[str, dict[str, object]] = {}
+    grouped: dict[str, dict[str, Any]] = {}
 
     for item in items:
         owners = owners_for_path(str(item["file_path"]), rules)
@@ -126,7 +127,7 @@ def summarize_by_owner(
         row["top_files"].add(str(item["file_path"]))
         row["top_rules"].add(str(item["rule_id"]))
 
-    rows: list[dict[str, object]] = []
+    rows: list[dict[str, Any]] = []
     for row in grouped.values():
         finding_count = int(row["finding_count"])
         total_risk = int(row["total_risk"])
@@ -157,13 +158,13 @@ def summarize_by_owner(
 
 
 def annotate_backlog_owners(
-    rows: list[dict[str, object]],
+    rows: list[dict[str, Any]],
     rules: list[CodeownersRule],
     *,
     unowned_label: str = "(unowned)",
-) -> list[dict[str, object]]:
+) -> list[dict[str, Any]]:
     """Annotate backlog-style rows with CODEOWNERS ownership."""
-    annotated: list[dict[str, object]] = []
+    annotated: list[dict[str, Any]] = []
     for row in rows:
         owners = owners_for_path(str(row.get("file_path", "")), rules)
         owner_key = " ".join(owners) if owners else unowned_label

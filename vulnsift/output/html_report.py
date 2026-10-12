@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from html import escape
+from typing import Any
 
 from vulnsift.analytics import compare_reports, get_backlog_items, get_hotspots, summarize_report
 from vulnsift.codeowners import CodeownersRule, annotate_backlog_owners, summarize_by_owner
@@ -36,7 +37,7 @@ def render_html_report(
     risk_bands = summary["risk_bands"]
 
     comparison_html = ""
-    if comparison is not None:
+    if comparison is not None and baseline is not None:
         comparison_summary = comparison["summary"]
         comparison_trend = escape(str(comparison["trend"]))
         comparison_trend_label = escape(str(comparison["trend"]).upper())
@@ -367,7 +368,7 @@ def render_html_report(
 """
 
 
-def _render_hotspots_table(hotspots: list[dict[str, object]]) -> str:
+def _render_hotspots_table(hotspots: list[dict[str, Any]]) -> str:
     if not hotspots:
         return '<p class="empty">No hotspot data available for this report.</p>'
     rows = []
@@ -389,7 +390,7 @@ def _render_hotspots_table(hotspots: list[dict[str, object]]) -> str:
     )
 
 
-def _render_backlog_table(backlog: list[dict[str, object]]) -> str:
+def _render_backlog_table(backlog: list[dict[str, Any]]) -> str:
     if not backlog:
         return '<p class="empty">No actionable findings at this threshold.</p>'
     rows = []
@@ -413,7 +414,7 @@ def _render_backlog_table(backlog: list[dict[str, object]]) -> str:
     )
 
 
-def _render_change_table(title: str, items: list[dict[str, object]], empty_message: str) -> str:
+def _render_change_table(title: str, items: list[dict[str, Any]], empty_message: str) -> str:
     if not items:
         return f'<section><h3>{escape(title)}</h3><p class="empty">{escape(empty_message)}</p></section>'
     rows = []
@@ -435,7 +436,7 @@ def _render_change_table(title: str, items: list[dict[str, object]], empty_messa
     )
 
 
-def _render_delta_table(title: str, items: list[dict[str, object]], empty_message: str) -> str:
+def _render_delta_table(title: str, items: list[dict[str, Any]], empty_message: str) -> str:
     if not items:
         return f'<section><h3>{escape(title)}</h3><p class="empty">{escape(empty_message)}</p></section>'
     rows = []
@@ -457,7 +458,7 @@ def _render_delta_table(title: str, items: list[dict[str, object]], empty_messag
     )
 
 
-def _render_owner_summary_table(rows: list[dict[str, object]]) -> str:
+def _render_owner_summary_table(rows: list[dict[str, Any]]) -> str:
     if not rows:
         return '<p class="empty">No owner summary data available.</p>'
     body = []
@@ -554,7 +555,7 @@ def _render_findings_detail(report: TriageReport) -> str:
     return "".join(html_parts)
 
 
-def _scanner_mix(source_formats: object) -> str:
+def _scanner_mix(source_formats: Any) -> str:
     entries = source_formats.items() if isinstance(source_formats, dict) else []
     return ", ".join(f"{name}:{count}" for name, count in entries) or "-"
 

@@ -6,6 +6,7 @@ import csv
 import json
 from io import StringIO
 from pathlib import Path
+from typing import Any
 
 from vulnsift.analytics import get_backlog_items
 from vulnsift.codeowners import CodeownersRule, annotate_backlog_owners
@@ -73,9 +74,9 @@ def _build_rows(
     min_risk: float,
     owner_rules: list[CodeownersRule] | None,
     unowned_label: str,
-) -> list[dict[str, object]]:
+) -> list[dict[str, Any]]:
     items = get_backlog_items(report, limit=top, min_risk=min_risk)
-    rows: list[dict[str, object]] = []
+    rows: list[dict[str, Any]] = []
     for rank, item in enumerate(items, 1):
         rows.append(
             {
@@ -102,7 +103,7 @@ def _build_rows(
     return rows
 
 
-def _render_csv(rows: list[dict[str, object]]) -> str:
+def _render_csv(rows: list[dict[str, Any]]) -> str:
     buffer = StringIO()
     fieldnames = [
         "rank",
@@ -129,7 +130,7 @@ def _render_csv(rows: list[dict[str, object]]) -> str:
     return buffer.getvalue()
 
 
-def _render_markdown(rows: list[dict[str, object]]) -> str:
+def _render_markdown(rows: list[dict[str, Any]]) -> str:
     lines = [
         "# VulnSift prioritized backlog",
         "",

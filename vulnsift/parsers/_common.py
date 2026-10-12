@@ -107,3 +107,8 @@ def _flatten(values: Iterable[Any]) -> Iterable[Any]:
             yield from _flatten(v)
         else:
             yield v
+
+
+def as_dict(value: object) -> dict[str, Any]:
+    """Return value if it is a JSON object, else an empty dict (scanner output is loosely typed)."""
+    return value if isinstance(value, dict) else {}

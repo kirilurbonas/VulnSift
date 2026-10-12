@@ -292,7 +292,7 @@ def store_report(conn: sqlite3.Connection, report: TriageReport, *, project: str
                 usage.output_tokens if usage else None,
             ),
         )
-        scan_id = int(cursor.lastrowid)
+        scan_id = int(cursor.lastrowid or 0)
         placeholders = ", ".join("?" * len(_FINDING_INSERT_COLS.split(",")))
         conn.executemany(
             f"INSERT INTO findings ({_FINDING_INSERT_COLS}) VALUES ({placeholders})",
@@ -357,7 +357,8 @@ def _resolve_scan(
 ) -> sqlite3.Row | None:
     """The explicit scan (optionally checked against project), else the latest scan of project/overall."""
     if scan_id is not None:
-        sql, params = "SELECT * FROM scans WHERE id = ?", [scan_id]
+        sql = "SELECT * FROM scans WHERE id = ?"
+        params: list[object] = [scan_id]
         if project is not None:
             sql += " AND project = ?"
             params.append(project)

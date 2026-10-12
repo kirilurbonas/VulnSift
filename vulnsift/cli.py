@@ -6,6 +6,7 @@ import os
 import random
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import NoReturn
 
 import click
 from rich.console import Console
@@ -39,7 +40,7 @@ err_console = Console(stderr=True)
 EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"]
 
 
-def _err_with_hint(msg: str, hint: str | None = None, *, code: int = 1) -> None:
+def _err_with_hint(msg: str, hint: str | None = None, *, code: int = 1) -> NoReturn:
     err_console.print(f"[red]Error:[/] {msg}", highlight=False)
     if hint:
         err_console.print(f"[dim]{hint}[/]", highlight=False)

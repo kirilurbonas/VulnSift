@@ -29,7 +29,7 @@ jobs:
       pull-requests: write
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Run your scanner (example: Semgrep via its official container image).
       # `|| true` keeps the job going when Semgrep reports findings; VulnSift decides pass/fail.
@@ -118,7 +118,7 @@ The action does not upload SARIF itself. To show VulnSift results in the Securit
 
 - name: Upload SARIF
   if: always() && steps.vulnsift.outputs.sarif != ''
-  uses: github/codeql-action/upload-sarif@v3
+  uses: github/codeql-action/upload-sarif@v4
   with:
     sarif_file: ${{ steps.vulnsift.outputs.sarif }}
 ```

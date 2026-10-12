@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from vulnsift.models import Location, UnifiedFinding
-from vulnsift.parsers._common import dedupe_ids, extract_cves, extract_cwes, load_json, safe_id
+from vulnsift.parsers._common import as_dict, dedupe_ids, extract_cves, extract_cwes, load_json, safe_id
 
 _MAX_PATHS_IN_MESSAGE = 5
 
@@ -108,7 +108,7 @@ def _vulns_to_finding(
     version = _version(vuln)
     pkg_ref = f"{package_name}@{version}" if version else package_name
 
-    identifiers = vuln.get("identifiers") if isinstance(vuln.get("identifiers"), dict) else {}
+    identifiers = as_dict(vuln.get("identifiers"))
     cves = extract_cves([identifiers.get("CVE") or [], vuln_id])
     cwes = extract_cwes([identifiers.get("CWE") or []])
 

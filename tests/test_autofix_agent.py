@@ -10,7 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import anthropic
-import httpx
+import httpx2
 import pytest
 
 from vulnsift.autofix import agent as agent_mod
@@ -89,8 +89,8 @@ def _write(root: Path, rel: str, content: str | bytes) -> Path:
 
 
 def _api_status_error(cls, status: int):
-    req = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
-    return cls(message="boom", response=httpx.Response(status, request=req), body=None)
+    req = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
+    return cls(message="boom", response=httpx2.Response(status, request=req), body=None)
 
 
 @pytest.fixture

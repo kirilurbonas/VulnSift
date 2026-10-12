@@ -78,7 +78,7 @@ def create_app(db_path: Path | str | None = None, *, token: str | None = None) -
         static_url_path="/static",
     )
     app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
-    app.json.sort_keys = False
+    app.json.sort_keys = False  # type: ignore[attr-defined]  # DefaultJSONProvider attribute
 
     resolved_path = str(db_path) if db_path is not None else str(DEFAULT_DB_PATH)
     if resolved_path == ":memory:":
@@ -162,7 +162,7 @@ def create_app(db_path: Path | str | None = None, *, token: str | None = None) -
 
     @app.route("/")
     def index():
-        resp = send_from_directory(app.template_folder, "index.html")
+        resp = send_from_directory(here / "templates", "index.html")
         resp.headers["Cache-Control"] = "no-cache"
         return resp
 

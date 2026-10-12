@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from rich.console import Console
 from rich.markup import escape
 from rich.panel import Panel
@@ -157,7 +159,7 @@ def render_report_insights(report: TriageReport, *, top_n: int = 5, console: Con
 
 
 def render_comparison_summary(
-    comparison: dict[str, object],
+    comparison: dict[str, Any],
     *,
     top_n: int = 5,
     console: Console | None = None,
@@ -275,7 +277,7 @@ def _render_change_table(
     console: Console,
     *,
     title: str,
-    items: object,
+    items: Any,
     top_n: int,
     empty_message: str,
 ) -> None:

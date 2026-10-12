@@ -1,5 +1,11 @@
 # VulnSift
 
+[![CI](https://github.com/kirilurbonas/VulnSift/actions/workflows/ci.yml/badge.svg)](https://github.com/kirilurbonas/VulnSift/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/kirilurbonas/VulnSift/actions/workflows/codeql.yml/badge.svg)](https://github.com/kirilurbonas/VulnSift/actions/workflows/codeql.yml)
+[![PyPI](https://img.shields.io/pypi/v/vulnsift)](https://pypi.org/project/vulnsift/)
+[![Python](https://img.shields.io/pypi/pyversions/vulnsift)](https://pypi.org/project/vulnsift/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 **AI vulnerability triage, from scanner noise to fixed code.**
 
 Security scanners report hundreds of findings, most of them noise. VulnSift reads scanner output (SARIF, Snyk, Semgrep, Trivy), asks Claude how exploitable each finding really is, and gives you:
@@ -189,7 +195,7 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Run Semgrep
         run: |
@@ -228,7 +234,7 @@ The action installs VulnSift from its own source, triages the scan, writes the s
 To show findings in the **Security** tab with AI scores and false positives suppressed, set `export-sarif: "true"` and upload the result:
 
 ```yaml
-      - uses: github/codeql-action/upload-sarif@v3
+      - uses: github/codeql-action/upload-sarif@v4
         if: always() && steps.vulnsift.outputs.sarif != ''
         with:
           sarif_file: ${{ steps.vulnsift.outputs.sarif }}
@@ -236,7 +242,7 @@ To show findings in the **Security** tab with AI scores and false positives supp
 
 This snippet needs `id: vulnsift` on the VulnSift step and `security-events: write` in the job's permissions.
 
-A full example is in [`.github/workflows/example-vulnsift.yml`](.github/workflows/example-vulnsift.yml), and more patterns are in [`docs/ci-integration-guide.md`](docs/ci-integration-guide.md).
+A full example is in [`examples/github-workflow.yml`](examples/github-workflow.yml), and more patterns are in [`docs/ci-integration-guide.md`](docs/ci-integration-guide.md).
 
 ## Other CI systems
 
@@ -336,11 +342,22 @@ Reports from 0.2 still load. Finding IDs and the cache format changed, so the fi
 
 ```bash
 pip install -e ".[dashboard,dotenv,dev]"
-ruff check vulnsift tests
-pytest --cov=vulnsift
+pre-commit install
+ruff check vulnsift tests && mypy && pytest --cov
 ```
 
-Tests never call the Anthropic API: they use a fake client (`tests/fakes.py`), and your `.env` and `ANTHROPIC_API_KEY` are ignored during test runs. See [CONTRIBUTING.md](CONTRIBUTING.md).
+Tests never call the Anthropic API: they use a fake client (`tests/fakes.py`), and your `.env` and `ANTHROPIC_API_KEY` are ignored during test runs.
+
+Every pull request runs:
+- lint and type checks;
+- tests on Linux, macOS and Windows with Python 3.11–3.14, with a coverage gate;
+- a dependency vulnerability audit and dependency review;
+- CodeQL;
+- a build plus a smoke test of the built wheel.
+
+Releases are published to PyPI with trusted publishing and signed build provenance.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md). To report a vulnerability, use a [private advisory](https://github.com/kirilurbonas/VulnSift/security/advisories/new).
 
 Feedback and real-world pipeline stories are welcome in [Issues](https://github.com/kirilurbonas/VulnSift/issues).
 

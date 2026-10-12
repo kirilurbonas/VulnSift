@@ -1,0 +1,7 @@
+# Default reviewers for everything in the repository.
+* @kirilurbonas
+
+# Supply-chain sensitive paths: CI, release and the published GitHub Action.
+/.github/ @kirilurbonas
+/action.yml @kirilurbonas
+/pyproject.toml @kirilurbonas

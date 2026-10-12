@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from vulnsift.models import Location, UnifiedFinding
-from vulnsift.parsers._common import dedupe_ids, extract_cves, extract_cwes, load_json, safe_id
+from vulnsift.parsers._common import as_dict, dedupe_ids, extract_cves, extract_cwes, load_json, safe_id
 
 _MAX_REFS_IN_DESCRIPTION = 5
 
@@ -146,7 +146,7 @@ def _misconfig_to_finding(m: dict, target: str, run_item: dict) -> UnifiedFindin
         desc = (desc + "\n\n" if desc else "") + f"Resolution: {m['Resolution']}"
     refs = _references(m)
 
-    cause = m.get("CauseMetadata") if isinstance(m.get("CauseMetadata"), dict) else {}
+    cause = as_dict(m.get("CauseMetadata"))
     start = cause.get("StartLine")
     end = cause.get("EndLine")
     loc = Location(

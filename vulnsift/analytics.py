@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 from collections import Counter, defaultdict
 from collections.abc import Iterable
+from typing import Any
 
 from vulnsift.models import HIGH_RISK_THRESHOLD, MEDIUM_RISK_THRESHOLD, TriageReport, TriageReportEntry
 
@@ -14,7 +15,7 @@ def actionable_entries(report: TriageReport) -> list[TriageReportEntry]:
     return [entry for entry in report.entries if entry.is_actionable]
 
 
-def summarize_report(report: TriageReport) -> dict[str, object]:
+def summarize_report(report: TriageReport) -> dict[str, Any]:
     """Compute high-signal summary metrics for a triage report."""
     actionable = actionable_entries(report)
     fp_count = sum(1 for entry in report.entries if entry.is_false_positive)
@@ -41,14 +42,14 @@ def summarize_report(report: TriageReport) -> dict[str, object]:
     }
 
 
-def get_hotspots(report: TriageReport, limit: int = 5) -> list[dict[str, object]]:
+def get_hotspots(report: TriageReport, limit: int = 5) -> list[dict[str, Any]]:
     """Return the riskiest files, ranked by concentrated actionable risk."""
     grouped: dict[str, list[TriageReportEntry]] = defaultdict(list)
     for entry in actionable_entries(report):
         path = entry.finding.location.file_path or "(unknown file)"
         grouped[path].append(entry)
 
-    hotspots: list[dict[str, object]] = []
+    hotspots: list[dict[str, Any]] = []
     for file_path, entries in grouped.items():
         scores = [entry.triage.risk_score for entry in entries]
         hotspots.append(
@@ -79,10 +80,10 @@ def get_priority_findings(
     limit: int = 5,
     *,
     min_risk: float = MEDIUM_RISK_THRESHOLD,
-) -> list[dict[str, object]]:
+) -> list[dict[str, Any]]:
     """Return the most urgent actionable findings with fix metadata."""
     backlog_items = get_backlog_items(report, limit=limit, min_risk=min_risk)
-    priorities: list[dict[str, object]] = []
+    priorities: list[dict[str, Any]] = []
     for item in backlog_items:
         priorities.append(
             {
@@ -105,9 +106,9 @@ def get_backlog_items(
     limit: int | None = None,
     *,
     min_risk: float = MEDIUM_RISK_THRESHOLD,
-) -> list[dict[str, object]]:
+) -> list[dict[str, Any]]:
     """Return a prioritized backlog export with enough detail for tickets and reports."""
-    priorities: list[dict[str, object]] = []
+    priorities: list[dict[str, Any]] = []
     for entry in actionable_entries(report):
         if entry.triage.risk_score < min_risk:
             continue
@@ -147,7 +148,7 @@ def get_backlog_items(
     return priorities[: max(limit, 0)]
 
 
-def compare_reports(current: TriageReport, baseline: TriageReport) -> dict[str, object]:
+def compare_reports(current: TriageReport, baseline: TriageReport) -> dict[str, Any]:
     """Compare two reports and return actionable regression/progress insights."""
     current_summary = summarize_report(current)
     baseline_summary = summarize_report(baseline)
@@ -171,7 +172,7 @@ def compare_reports(current: TriageReport, baseline: TriageReport) -> dict[str, 
         key=lambda item: (-int(item["risk_score"]), str(item["file_path"]), str(item["rule_id"])),
     )
 
-    risk_changes: list[dict[str, object]] = []
+    risk_changes: list[dict[str, Any]] = []
     for key in persisting_keys:
         current_entry = current_map[key]
         baseline_entry = baseline_map[key]
@@ -265,7 +266,7 @@ def _entry_map(entries: Iterable[TriageReportEntry]) -> dict[str, TriageReportEn
     return result
 
 
-def _entry_snapshot(entry: TriageReportEntry) -> dict[str, object]:
+def _entry_snapshot(entry: TriageReportEntry) -> dict[str, Any]:
     return {
         "finding_id": entry.finding.id,
         "rule_id": entry.finding.rule_id,

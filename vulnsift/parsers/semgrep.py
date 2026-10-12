@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from vulnsift.models import Location, UnifiedFinding
-from vulnsift.parsers._common import dedupe_ids, extract_cves, extract_cwes, load_json, safe_id, short_hash
+from vulnsift.parsers._common import as_dict, dedupe_ids, extract_cves, extract_cwes, load_json, safe_id, short_hash
 
 # Semgrep rule severities -> VulnSift scanner severity. Newer rules may already use critical/high/...
 SEVERITY_MAP = {
@@ -69,10 +69,10 @@ def _result_to_finding(res: dict, index: int, path_list: list) -> UnifiedFinding
     else:
         file_path = str(path_val) if path_val else ""
 
-    extra = res.get("extra") if isinstance(res.get("extra"), dict) else {}
+    extra = as_dict(res.get("extra"))
     message = str(extra.get("message") or "").strip()
     scanner_severity = extra.get("severity") or "WARNING"
-    metadata = extra.get("metadata") if isinstance(extra.get("metadata"), dict) else {}
+    metadata = as_dict(extra.get("metadata"))
 
     cwes = extract_cwes(_as_list(metadata.get("cwe")))
     cves = extract_cves([*_as_list(metadata.get("cve")), *_as_list(metadata.get("cves")), check_id])
@@ -81,8 +81,8 @@ def _result_to_finding(res: dict, index: int, path_list: list) -> UnifiedFinding
     if metadata.get("source"):
         references.append(str(metadata["source"]))
 
-    start = res.get("start") if isinstance(res.get("start"), dict) else {}
-    end = res.get("end") if isinstance(res.get("end"), dict) else {}
+    start = as_dict(res.get("start"))
+    end = as_dict(res.get("end"))
     start_line = start.get("line") if isinstance(start.get("line"), int) else None
     end_line = end.get("line") if isinstance(end.get("line"), int) else start_line
 
