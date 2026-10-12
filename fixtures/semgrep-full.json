@@ -1,0 +1,58 @@
+{
+  "version": "1.85.0",
+  "results": [
+    {
+      "check_id": "python.django.security.injection.tainted-sql-string.tainted-sql-string",
+      "path": "app/views.py",
+      "start": { "line": 40, "col": 9, "offset": 1201 },
+      "end": { "line": 41, "col": 52, "offset": 1290 },
+      "extra": {
+        "message": "Detected user input used to manually construct a SQL string.\nUse parameterized queries instead.",
+        "metadata": {
+          "cwe": ["CWE-89: Improper Neutralization of Special Elements used in an SQL Command ('SQL Injection')"],
+          "owasp": ["A01:2017 - Injection", "A03:2021 - Injection"],
+          "references": ["https://docs.djangoproject.com/en/stable/topics/security/#sql-injection-protection"],
+          "category": "security",
+          "confidence": "MEDIUM",
+          "likelihood": "HIGH",
+          "impact": "HIGH",
+          "source": "https://semgrep.dev/r/python.django.security.injection.tainted-sql-string.tainted-sql-string"
+        },
+        "severity": "ERROR",
+        "fingerprint": "0a1b2c3d4e5f60718293a4b5c6d7e8f9_0",
+        "lines": "        query = \"SELECT * FROM users WHERE id = \" + request.GET[\"id\"]\n        cursor.execute(query)\n",
+        "is_ignored": false,
+        "engine_kind": "OSS"
+      }
+    },
+    {
+      "check_id": "generic.secrets.security.detected-generic-secret.detected-generic-secret",
+      "path": "config/dev.env",
+      "start": { "line": 3, "col": 1, "offset": 40 },
+      "end": { "line": 3, "col": 30, "offset": 69 },
+      "extra": {
+        "message": "Generic Secret detected",
+        "metadata": { "cwe": "CWE-798: Use of Hard-coded Credentials", "category": "security" },
+        "severity": "INFO",
+        "fingerprint": "requires login",
+        "lines": "requires login",
+        "is_ignored": false
+      }
+    },
+    {
+      "check_id": "javascript.express.security.audit.express-open-redirect.express-open-redirect",
+      "path": "web/server.js",
+      "start": { "line": 77, "col": 5, "offset": 2010 },
+      "end": { "line": 77, "col": 40, "offset": 2045 },
+      "extra": {
+        "message": "Open redirect via user-controlled URL.",
+        "metadata": { "cwe": ["CWE-601: URL Redirection to Untrusted Site ('Open Redirect')"], "owasp": "A01:2021 - Broken Access Control" },
+        "severity": "WARNING",
+        "fingerprint": "ffeeddccbbaa99887766554433221100_0",
+        "lines": "    res.redirect(req.query.next)"
+      }
+    }
+  ],
+  "errors": [],
+  "paths": { "scanned": ["app/views.py", "config/dev.env", "web/server.js"] }
+}

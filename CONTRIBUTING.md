@@ -6,7 +6,7 @@
 2. Install the package and dev dependencies:
 
    ```bash
-   pip install . pytest pytest-asyncio ruff
+   pip install -e ".[dashboard,dotenv,dev]"
    ```
 
 3. Copy `.env.example` to `.env` and set `ANTHROPIC_API_KEY` if you want to run triage locally.
@@ -14,10 +14,10 @@
 ## Running tests
 
 ```bash
-pytest tests/ -v
+pytest --cov=vulnsift
 ```
 
-Triage tests mock the Anthropic API; no key is required for CI.
+Tests never call the Anthropic API: they use the fake client in `tests/fakes.py`, and an autouse fixture clears `ANTHROPIC_API_KEY` and disables `.env` loading.
 
 ## Linting
 
@@ -32,7 +32,7 @@ To run ruff before each commit, install [pre-commit](https://pre-commit.com/) an
 ```yaml
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.6.0
+    rev: v0.15.0
     hooks:
       - id: ruff
         args: [--fix]

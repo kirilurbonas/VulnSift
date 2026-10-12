@@ -2,7 +2,43 @@
 
 All notable changes to VulnSift are documented here. The project follows [Semantic Versioning](https://semver.org/). Triage report JSON uses `schema_version` and `prompt_version` for compatibility.
 
-## [0.2.0] - Unreleased
+## [0.3.0] - Unreleased
+
+### Fixed
+
+- **Triage failures no longer pass as false positives.** A finding whose API call failed used to be recorded as `risk_score=0, is_likely_false_positive=True`, so a CI gate could pass on an unassessed scan. Failures are now recorded in `triage.error`, shown as `ERR`, and fail the gate by default (`--allow-errors` to opt out).
+- **Gate no longer loses the report.** `triage` writes JSON/SARIF/Markdown *before* exiting with code 2, so the GitHub Action can still post its PR comment when the gate fails.
+- **SARIF file paths.** `physicalLocation.artifactLocation.uri` (used by Semgrep, CodeQL and most tools) was ignored, leaving `file_path` empty. Rule lookup via `ruleIndex`/extensions, `security-severity`, CWE/CVE tags and fingerprints are now read too.
+- **Snyk** uses `displayTargetFile` for the location, accepts multi-project (`--all-projects`) output, and merges findings repeated across dependency paths. **Trivy** keeps references and fixed versions, and parses misconfigurations and secrets.
+- **Autofix safety.** Patches can no longer overwrite whole dependency files with a fragment, paths outside `--repo-root` are refused, one failing finding no longer aborts the run, low-confidence patches are not applied (`--min-confidence`, default 7), and writes are atomic.
+- **`--open-pr`** opens one clean PR per fix from the base branch (previously each branch stacked on the previous fix and carried uncommitted changes); a dirty tree is refused.
+- **CODEOWNERS** matching follows GitHub's rules (`.github/` paths, unanchored directory names, `*` vs `**`).
+- **`compare`** no longer treats findings as new + resolved just because code moved to different lines.
+- **Triage cache** is keyed on model and project context as well, saved incrementally and atomically, and never caches errors.
+- **Config errors** (invalid YAML, unknown keys, wrong types) are reported instead of silently falling back to defaults.
+- **Dashboard** no longer shares one SQLite connection across server threads.
+- Rich markup in scanner text is no longer interpreted in the terminal; Markdown/HTML in PR comments and CSV formula prefixes in backlog/owner exports are escaped.
+
+### Added
+
+- Parallel triage (`--concurrency`, default 8), de-duplication of identical findings, prompt caching of the system prompt, a progress bar with ETA, and token/cost reporting (`report.usage`).
+- `--model`, `--effort`, `--project`, repeatable `--export` with a new `sarif` format (GitHub code scanning compatible), global `--config` / `VULNSIFT_CONFIG`.
+- Triage results now include the model's `confidence`; reports record `model`, `generated_at`, `project` and `usage`. The AI's reasoning and exploitability notes now appear in remediation cards, the HTML report and the PR comment.
+- Config keys: `project`, `model`, `effort`, `concurrency`, `cache`, `fail_on_error`. Config is found in parent directories up to the repo root.
+- HTML report: per-finding details and dark mode.
+- Dashboard: projects, scan selector, a searchable/filterable findings explorer with a detail panel (reasoning, remediation, snippet), "resolved / new since previous scan" progress, dark mode, no external assets, strict CSP, optional bearer token for writes, waitress server, automatic schema migration.
+- `vulnsift store --project`, `vulnsift dashboard --token`.
+- Autofix: `--min-confidence`, `--model`, `--draft`; a skip reason for every finding that was not patched.
+
+### Changed
+
+- Uses the Anthropic Python SDK 1.x with structured outputs; the default model is `claude-opus-5-5`.
+- `PROMPT_VERSION` 2.0 (hardened against prompt injection from scanned code); report `schema_version` 1.1.
+- GitHub Action installs VulnSift from the action itself, passes inputs via environment variables (no `eval`), paginates comment lookup, and adds `model`, `concurrency`, `output-dir`, `export-sarif` and `fail-on-error` inputs.
+- Packaging moved to PEP 621 metadata; `dev` extra; CI tests Python 3.11–3.13 and macOS with coverage; releases use PyPI trusted publishing after tests pass.
+
+## [0.2.0]
+
 
 ### Added
 

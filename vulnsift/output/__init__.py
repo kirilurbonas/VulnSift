@@ -2,16 +2,19 @@
 
 from vulnsift.output.backlog import render_backlog, write_backlog
 from vulnsift.output.console import (
+    progress_bar,
     render_comparison_summary,
     render_owner_summary_table,
     render_report_insights,
     render_summary_table,
+    render_usage,
 )
 from vulnsift.output.github_comment import render_github_comment
 from vulnsift.output.html_report import render_html_report
 from vulnsift.output.json_export import export_report_json
 from vulnsift.output.markdown import render_remediation_cards, render_remediation_cards_single
 from vulnsift.output.owners import render_owner_summary
+from vulnsift.output.sarif_export import export_report_sarif, report_to_sarif
 
 __all__ = [
     "render_summary_table",
@@ -26,4 +29,8 @@ __all__ = [
     "export_report_json",
     "render_github_comment",
     "render_owner_summary",
+    "render_usage",
+    "progress_bar",
+    "export_report_sarif",
+    "report_to_sarif",
 ]

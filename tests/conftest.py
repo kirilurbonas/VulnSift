@@ -28,3 +28,12 @@ def sample_semgrep_path(fixtures_dir: Path) -> Path:
 @pytest.fixture
 def sample_trivy_path(fixtures_dir: Path) -> Path:
     return fixtures_dir / "sample.trivy.json"
+
+
+@pytest.fixture(autouse=True)
+def _isolate_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Never read a developer's .env or real API key during tests."""
+    monkeypatch.setenv("VULNSIFT_DISABLE_DOTENV", "1")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("VULNSIFT_CONFIG", raising=False)
+    monkeypatch.delenv("VULNSIFT_DASHBOARD_TOKEN", raising=False)

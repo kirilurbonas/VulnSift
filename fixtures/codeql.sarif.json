@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "CodeQL",
+          "organization": "GitHub",
+          "semanticVersion": "2.18.4",
+          "rules": []
+        },
+        "extensions": [
+          {
+            "name": "codeql/javascript-queries",
+            "semanticVersion": "1.1.3",
+            "rules": [
+              {
+                "id": "js/xss",
+                "name": "js/xss",
+                "shortDescription": { "text": "Client-side cross-site scripting" },
+                "fullDescription": { "text": "Writing user input directly to the DOM allows for a cross-site scripting vulnerability." },
+                "defaultConfiguration": { "enabled": true, "level": "error" },
+                "help": { "text": "# Client-side cross-site scripting\nDirectly writing user input (for example, a URL query parameter) to a webpage without properly sanitizing the input first, allows for a cross-site scripting vulnerability.", "markdown": "# Client-side cross-site scripting" },
+                "properties": {
+                  "tags": ["security", "external/cwe/cwe-079", "external/cwe/cwe-116"],
+                  "description": "Writing user input directly to the DOM allows for a cross-site scripting vulnerability.",
+                  "id": "js/xss",
+                  "kind": "path-problem",
+                  "name": "Client-side cross-site scripting",
+                  "precision": "high",
+                  "problem.severity": "error",
+                  "security-severity": "7.8"
+                }
+              },
+              {
+                "id": "js/path-injection",
+                "name": "js/path-injection",
+                "shortDescription": { "text": "Uncontrolled data used in path expression" },
+                "fullDescription": { "text": "Accessing paths influenced by users can allow an attacker to access unexpected resources." },
+                "defaultConfiguration": { "enabled": true, "level": "error" },
+                "properties": {
+                  "tags": ["security", "external/cwe/cwe-022", "external/cwe/cwe-023", "external/cwe/cwe-036"],
+                  "security-severity": "7.5"
+                }
+              },
+              {
+                "id": "js/unused-local-variable",
+                "name": "js/unused-local-variable",
+                "shortDescription": { "text": "Unused variable, import, function or class" },
+                "fullDescription": { "text": "Unused variables, imports, functions or classes may be a symptom of a bug and should be examined carefully." },
+                "defaultConfiguration": { "enabled": true, "level": "note" },
+                "properties": { "tags": ["maintainability"], "precision": "very-high" }
+              }
+            ]
+          }
+        ]
+      },
+      "artifacts": [
+        { "location": { "uri": "src/client/render.js", "uriBaseId": "%SRCROOT%", "index": 0 } },
+        { "location": { "uri": "src/server/files.js", "uriBaseId": "%SRCROOT%", "index": 1 } },
+        { "location": { "uri": "src/server/util.js", "uriBaseId": "%SRCROOT%", "index": 2 } }
+      ],
+      "results": [
+        {
+          "ruleId": "js/xss",
+          "ruleIndex": 0,
+          "rule": { "id": "js/xss", "index": 0, "toolComponent": { "index": 0 } },
+          "message": { "text": "Cross-site scripting vulnerability due to [user-provided value](1)." },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": { "uri": "src/client/render.js", "uriBaseId": "%SRCROOT%", "index": 0 },
+                "region": { "startLine": 48, "startColumn": 23, "endColumn": 45 }
+              }
+            }
+          ],
+          "partialFingerprints": { "primaryLocationLineHash": "3b8f1a2c9d0e4f56:1", "primaryLocationStartColumnFingerprint": "18" },
+          "codeFlows": []
+        },
+        {
+          "rule": { "id": "js/path-injection", "index": 1, "toolComponent": { "index": 0 } },
+          "message": { "text": "This path depends on a [user-provided value](1)." },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": { "index": 1 },
+                "region": { "startLine": 31, "startColumn": 22, "endLine": 31, "endColumn": 40 },
+                "contextRegion": { "startLine": 29, "endLine": 33, "snippet": { "text": "app.get('/download', (req, res) => {\n  const file = req.query.name;\n  res.sendFile(path.join(ROOT, file));\n});\n" } }
+              }
+            }
+          ],
+          "partialFingerprints": { "primaryLocationLineHash": "aa11bb22cc33dd44:1" }
+        },
+        {
+          "ruleId": "js/unused-local-variable",
+          "rule": { "id": "js/unused-local-variable", "index": 2, "toolComponent": { "index": 0 } },
+          "message": { "text": "Unused variable tmp." },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": { "uri": "src/server/util.js", "uriBaseId": "%SRCROOT%", "index": 2 },
+                "region": { "startLine": 7, "startColumn": 7, "endColumn": 10 }
+              }
+            }
+          ],
+          "partialFingerprints": { "primaryLocationLineHash": "aa11bb22cc33dd44:1" }
+        }
+      ]
+    },
+    {
+      "tool": { "driver": { "name": "CodeQL", "rules": [] } },
+      "results": []
+    }
+  ]
+}

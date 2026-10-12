@@ -1,27 +1,24 @@
-"""VulnSift CLI: triage, report, validate."""
+"""VulnSift CLI: triage, report, compare, share, backlog, owners, autofix, dashboard."""
 
 from __future__ import annotations
 
 import os
+import random
+from datetime import UTC, datetime
 from pathlib import Path
-
-# Optional: load .env so ANTHROPIC_API_KEY can be set without exporting
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except ImportError:
-    pass
 
 import click
 from rich.console import Console
 
 from vulnsift import __version__
-from vulnsift.analytics import compare_reports
+from vulnsift.analytics import compare_reports, evaluate_gate
 from vulnsift.codeowners import load_codeowners
-from vulnsift.config import VulnSiftConfig, load_config, resolve_anthropic_api_key
-from vulnsift.models import TriageReport, TriageReportEntry, TriageResult
+from vulnsift.config import ConfigError, VulnSiftConfig, load_config, resolve_anthropic_api_key
+from vulnsift.models import TriageReport
 from vulnsift.output import (
     export_report_json,
+    export_report_sarif,
+    progress_bar,
     render_backlog,
     render_comparison_summary,
     render_html_report,
@@ -31,27 +28,40 @@ from vulnsift.output import (
     render_remediation_cards_single,
     render_report_insights,
     render_summary_table,
+    render_usage,
 )
-from vulnsift.output.console import progress_spinner
 from vulnsift.parsers import SUPPORTED_FORMATS, detect_format, parse_scan_file
-from vulnsift.triage.agent import triage_finding
 from vulnsift.triage.prompts import PROMPT_VERSION
 
 console = Console()
+err_console = Console(stderr=True)
+
+EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"]
 
 
-def _err_with_hint(msg: str, hint: str | None = None) -> None:
-    console.print(f"[red]Error:[/] {msg}")
+def _err_with_hint(msg: str, hint: str | None = None, *, code: int = 1) -> None:
+    err_console.print(f"[red]Error:[/] {msg}", highlight=False)
     if hint:
-        console.print(f"[dim]{hint}[/]")
-    raise SystemExit(1)
+        err_console.print(f"[dim]{hint}[/]", highlight=False)
+    raise SystemExit(code)
 
 
-def _require_api_key(cfg: VulnSiftConfig | None = None) -> None:
-    """
-    Ensure ANTHROPIC_API_KEY is available (env or api_key_file in config) before API calls.
-    """
-    cfg = cfg or load_config()
+def _config() -> VulnSiftConfig:
+    """Load config once per invocation (honours --config / VULNSIFT_CONFIG)."""
+    ctx = click.get_current_context()
+    root = ctx.find_root()
+    root.ensure_object(dict)
+    if "config" not in root.obj:
+        try:
+            root.obj["config"] = load_config(path=root.obj.get("config_path"))
+        except ConfigError as e:
+            _err_with_hint(str(e), "Fix the config file or point --config at another one.")
+    return root.obj["config"]
+
+
+def _require_api_key(cfg: VulnSiftConfig | None = None) -> str:
+    """Ensure ANTHROPIC_API_KEY is available (env or api_key_file in config) before API calls."""
+    cfg = cfg or _config()
     key = resolve_anthropic_api_key(cfg)
     if not key:
         _err_with_hint(
@@ -59,17 +69,29 @@ def _require_api_key(cfg: VulnSiftConfig | None = None) -> None:
             "Set ANTHROPIC_API_KEY, add it to .env, or set api_key_file in vulnsift.yaml to a file containing the key.",
         )
     os.environ["ANTHROPIC_API_KEY"] = key
+    return key
 
 
 def _load_triage_report(path_like: str) -> TriageReport:
     path = Path(path_like)
-    if path.suffix.lower() != ".json":
-        _err_with_hint("Expected a JSON file (e.g. triage-report.json).")
     try:
         return TriageReport.model_validate_json(path.read_text(encoding="utf-8"))
     except Exception as e:
-        _err_with_hint(str(e), "Tip: generate with `vulnsift triage --input <scan> --export json`.")
+        _err_with_hint(
+            f"{path}: not a valid VulnSift triage report ({type(e).__name__}).",
+            "Tip: generate one with `vulnsift triage --input <scan> --export json`.",
+        )
     raise AssertionError("unreachable")
+
+
+def _write_or_echo(rendered: str, output_path: str | None, message: str) -> None:
+    if output_path:
+        output = Path(output_path)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(rendered, encoding="utf-8")
+        console.print(f"[green]{message} {output}[/]")
+    else:
+        click.echo(rendered)
 
 
 def _load_codeowners_rules(
@@ -93,12 +115,32 @@ def _load_codeowners_rules(
 
 @click.group(
     epilog="""
-Exit codes:  0 = success,  1 = error,  2 = triage gate failed (--gate-threshold).
+Exit codes:  0 = success,  1 = error,  2 = gate failed (--gate-threshold / --fail-on-new-risk),
+             130 = interrupted.
 """,
 )
 @click.version_option(version=__version__, prog_name="vulnsift")
-def main() -> None:
+@click.option(
+    "--config",
+    "config_path",
+    type=click.Path(dir_okay=False),
+    envvar="VULNSIFT_CONFIG",
+    default=None,
+    help="Config file (default: nearest vulnsift.yaml / .vulnsift.yaml up to the repo root).",
+)
+@click.pass_context
+def main(ctx: click.Context, config_path: str | None) -> None:
     """VulnSift: AI-powered vulnerability triage from scanner output to actionable remediation."""
+    ctx.ensure_object(dict)
+    ctx.obj["config_path"] = config_path
+    # Optional: load .env so ANTHROPIC_API_KEY can be set without exporting (never overrides real env vars).
+    if not os.environ.get("VULNSIFT_DISABLE_DOTENV"):
+        try:
+            from dotenv import find_dotenv, load_dotenv
+
+            load_dotenv(find_dotenv(usecwd=True), override=False)
+        except ImportError:
+            pass
 
 
 @main.command(
@@ -107,15 +149,16 @@ Examples:
   vulnsift triage --input scan.sarif --export json
   vulnsift triage --input scan.sarif --dry-run
   vulnsift triage --input scan.sarif --limit 10 --output-dir ./out
-  vulnsift triage --input scan.sarif --redact-code --gate-threshold 7
-  vulnsift triage --input scan.sarif --sample 50
+  vulnsift triage --input scan.sarif --redact-code --gate-threshold 7 --export json --export sarif
+  vulnsift triage --input scan.sarif --sample 50 --seed 1 --cache .vulnsift-cache.json
+  vulnsift triage --input scan.sarif --model claude-sonnet-5-5 --concurrency 16
 """,
 )
 @click.option(
     "--input",
     "input_path",
     required=True,
-    type=click.Path(exists=True),
+    type=click.Path(exists=True, dir_okay=False),
     help="Scan file (SARIF, Snyk, Semgrep, Trivy).",
 )
 @click.option(
@@ -127,60 +170,83 @@ Examples:
 )
 @click.option(
     "--export",
-    "export_format",
-    type=click.Choice(["json", "md", "md-single"]),
-    default=None,
-    help="Export report: json, md (per-file cards), or md-single (one file).",
+    "export_formats",
+    type=click.Choice(["json", "sarif", "md", "md-single"]),
+    multiple=True,
+    help="Repeatable. json: triage-report.json, sarif: triage-report.sarif, md: one card per finding "
+    "(default when no --export), md-single: remediation.md.",
 )
 @click.option(
     "--output-dir",
-    type=click.Path(),
+    type=click.Path(file_okay=False),
     default=None,
-    help="Dir for Markdown/JSON (default: from config or ./vulnsift-output).",
+    help="Dir for Markdown/JSON/SARIF (default: from config or ./vulnsift-output).",
 )
 @click.option("--context", default=None, help="Project context (e.g. 'Python app, internal only'). Overrides config.")
+@click.option("--project", default=None, help="Project name recorded in the report (used by the dashboard).")
 @click.option("--include-fp", is_flag=True, help="Include likely false positives in summary table.")
-@click.option("--limit", type=int, default=None, help="Max number of findings to triage (first N).")
-@click.option("--sample", type=int, default=None, help="Randomly sample N findings to triage (instead of all/first N).")
+@click.option("--limit", type=click.IntRange(min=1), default=None, help="Max number of findings to triage (first N).")
+@click.option("--sample", type=click.IntRange(min=1), default=None, help="Randomly sample N findings to triage.")
 @click.option("--seed", type=int, default=None, help="Random seed for --sample (reproducible CI runs).")
 @click.option(
     "--cache",
     "cache_path",
-    type=click.Path(),
+    type=click.Path(dir_okay=False),
     default=None,
-    help="JSON cache file to reuse triage results for unchanged findings (invalidated when prompt_version changes).",
+    help="JSON cache to reuse results for unchanged findings (keyed on content, prompt, model and context).",
+)
+@click.option("--model", default=None, help="Claude model ID (default: from config or claude-opus-5-5).")
+@click.option("--effort", type=click.Choice(EFFORT_LEVELS), default=None, help="Reasoning effort for the model.")
+@click.option(
+    "--concurrency", type=click.IntRange(1, 64), default=None, help="Parallel triage requests (default: 8)."
 )
 @click.option("--dry-run", is_flag=True, help="Parse and validate only; do not call triage API.")
 @click.option("--redact-code", is_flag=True, help="Do not send code snippets to the AI model.")
 @click.option(
     "--gate-threshold",
-    type=float,
+    type=click.FloatRange(0, 10),
     default=None,
-    help="If set, exit with code 2 when any non-FP finding has risk >= threshold.",
+    help="Exit with code 2 when any actionable finding has risk >= threshold.",
+)
+@click.option(
+    "--fail-on-error/--allow-errors",
+    default=None,
+    help="With a gate, also fail when findings could not be triaged (default: fail).",
 )
 @click.option("--verbose", "-v", is_flag=True, help="Verbose output.")
 def triage(
     input_path: str,
     fmt: str,
-    export_format: str | None,
+    export_formats: tuple[str, ...],
     output_dir: str | None,
     context: str | None,
+    project: str | None,
     include_fp: bool,
     limit: int | None,
     sample: int | None,
     seed: int | None,
     cache_path: str | None,
+    model: str | None,
+    effort: str | None,
+    concurrency: int | None,
     dry_run: bool,
     redact_code: bool,
     gate_threshold: float | None,
+    fail_on_error: bool | None,
     verbose: bool,
 ) -> None:
     """Triage scan findings with Claude and output summary + remediation cards."""
-    cfg = load_config()
+    cfg = _config()
     out_dir = Path(output_dir or cfg.output_dir)
     context = context or cfg.project_context
+    project = project or cfg.project
     redact_code = redact_code or cfg.redact_code
     gate_threshold = gate_threshold if gate_threshold is not None else cfg.gate_threshold
+    fail_on_error = cfg.fail_on_error if fail_on_error is None else fail_on_error
+    model = model or cfg.model
+    effort = effort or cfg.effort
+    concurrency = concurrency or cfg.concurrency
+    cache_path = cache_path or cfg.cache
 
     try:
         findings = parse_scan_file(input_path, fmt)
@@ -194,112 +260,119 @@ def triage(
         console.print(f"[dim]Parsed {len(findings)} finding(s) from {input_path}[/]")
     if not findings:
         console.print("[green]No findings in scan file.[/]")
-        return
+        findings = []
 
     total_findings = len(findings)
-    if total_findings > 1000:
+    if total_findings > 1000 and not (limit or sample):
         console.print(
-            f"[dim]Large scan ({total_findings} findings). Consider --limit or --sample to reduce cost.[/]"
+            f"[dim]Large scan ({total_findings} findings). Consider --limit, --sample or --cache to reduce cost.[/]"
         )
 
-    if sample is not None and sample > 0:
-        import random
-        if seed is not None:
-            random.seed(seed)
+    if sample is not None:
         n = min(sample, len(findings))
-        findings = random.sample(findings, n)
+        findings = random.Random(seed).sample(findings, n)
         if verbose:
             console.print(f"[dim]Sampled {n} finding(s) at random[/]")
-    if limit is not None and limit > 0:
+    if limit is not None:
         findings = findings[:limit]
         if verbose:
             console.print(f"[dim]Limited to {limit} finding(s)[/]")
 
     if dry_run:
-        console.print(f"[green]Dry run:[/] Would triage [bold]{len(findings)}[/] finding(s).")
+        console.print(f"[green]Dry run:[/] Would triage [bold]{len(findings)}[/] finding(s) with {model}.")
         return
 
-    # Require API key only when we are about to make real triage calls.
-    _require_api_key(cfg)
+    report = TriageReport(
+        source_file=str(input_path),
+        prompt_version=PROMPT_VERSION,
+        model=model,
+        project=project,
+        generated_at=datetime.now(UTC).isoformat(timespec="seconds"),
+        entries=[],
+    )
 
-    from vulnsift.triage import cache as triage_cache
+    if findings:
+        # Require API key only when we are about to make real triage calls.
+        key = _require_api_key(cfg)
+        from vulnsift.llm import UsageTracker, make_client
+        from vulnsift.triage.engine import FatalTriageError, TriageOptions, run_triage
 
-    cache_file = Path(cache_path) if cache_path else None
-    cache_map: dict[str, dict] = {}
-    if cache_file:
-        cache_map = triage_cache.load_cache(cache_file, PROMPT_VERSION)
+        tracker = UsageTracker(model)
+        options = TriageOptions(
+            model=model, effort=effort, project_context=context, redact_code=redact_code, concurrency=concurrency
+        )
+        try:
+            with progress_bar(console) as progress:
+                task = progress.add_task("Triaging", total=len(findings), detail="")
+                counts = {"error": 0}
 
-    report = TriageReport(source_file=str(input_path), prompt_version=PROMPT_VERSION, entries=[])
-    out_dir.mkdir(parents=True, exist_ok=True)
+                def on_result(entry, status: str) -> None:
+                    if status == "error":
+                        counts["error"] += 1
+                        if verbose:
+                            progress.console.print(
+                                f"[magenta]Error {entry.finding.id}:[/] {entry.triage.error}", highlight=False
+                            )
+                    detail = f"{counts['error']} error(s)" if counts["error"] else ""
+                    progress.update(task, advance=1, detail=detail)
 
-    with progress_spinner(console) as progress:
-        task = progress.add_task("Triaging findings...", total=len(findings)) if progress else None
-        for f in findings:
-            fp = triage_cache.fingerprint(f, PROMPT_VERSION, redact_code)
-            if cache_file and fp in cache_map:
-                cached_entry = triage_cache.cache_entry_to_report_entry(f, cache_map[fp])
-                if cached_entry is not None:
-                    report.entries.append(cached_entry)
-                    if verbose:
-                        console.print(f"[dim]Cache hit {f.id}[/]")
-                    if task is not None:
-                        progress.advance(task)
-                    continue
-            try:
-                triage_result, remediation = triage_finding(f, project_context=context, redact_code=redact_code)
-                entry = TriageReportEntry(finding=f, triage=triage_result, remediation=remediation)
-                report.entries.append(entry)
-                if cache_file:
-                    cache_map[fp] = triage_cache.report_entry_to_cache_dict(entry)
-            except Exception as e:
-                if verbose:
-                    console.print(f"[yellow]Skip {f.id}:[/] {e}")
-                report.entries.append(
-                    TriageReportEntry(
-                        finding=f,
-                        triage=TriageResult(
-                            risk_score=0,
-                            is_likely_false_positive=True,
-                            reasoning=str(e),
-                        ),
-                        remediation=None,
-                    )
+                entries, stats = run_triage(
+                    findings,
+                    client=make_client(key),
+                    options=options,
+                    tracker=tracker,
+                    cache_path=Path(cache_path) if cache_path else None,
+                    on_result=on_result,
                 )
-            if task is not None:
-                progress.advance(task)
+        except FatalTriageError as e:
+            _err_with_hint(f"Triage aborted: {e}", "No findings were assessed; nothing was written.")
+        except KeyboardInterrupt:
+            err_console.print("[yellow]Interrupted.[/] Partial results were saved to the cache (if --cache is set).")
+            raise SystemExit(130) from None
 
-    if cache_file:
-        triage_cache.save_cache(cache_file, cache_map, PROMPT_VERSION)
-        if verbose:
-            console.print(f"[dim]Wrote triage cache to {cache_file}[/]")
+        report.entries = entries
+        report.usage = tracker.summary()
+        if verbose or stats.cache_hits or stats.duplicates:
+            console.print(
+                f"[dim]{stats.total} finding(s): {stats.api_calls} triaged via API, {stats.cache_hits} from cache, "
+                f"{stats.duplicates} duplicate(s) reused.[/]"
+            )
 
     report.entries.sort(key=lambda e: (-e.triage.risk_score, e.finding.id))
 
     render_summary_table(report, include_false_positives=include_fp, console=console)
-    written_cards = render_remediation_cards(report.entries, out_dir, only_actionable=True)
-    if written_cards:
-        console.print(f"[green]Wrote {len(written_cards)} remediation card(s) to {out_dir}[/]")
+    render_usage(report.usage, model=model, console=console)
 
-    # If gate_threshold is set, treat high-risk findings as a CI gate.
-    if gate_threshold is not None:
-        max_risk = max(
-            (e.triage.risk_score for e in report.entries if not e.triage.is_likely_false_positive),
-            default=0,
-        )
-        if max_risk >= gate_threshold:
-            console.print(
-                f"[red]Gate failed:[/] highest non-FP risk score {max_risk} >= threshold {gate_threshold}."
-            )
-            raise SystemExit(2)
-
-    if export_format == "json":
-        json_path = out_dir / "triage-report.json"
-        export_report_json(report, json_path)
+    # Write every requested artifact BEFORE evaluating the gate, so CI always has a report to show.
+    out_dir.mkdir(parents=True, exist_ok=True)
+    exports = set(export_formats) or {"md"}
+    if "md" in exports:
+        written_cards = render_remediation_cards(report.entries, out_dir, only_actionable=True)
+        if written_cards:
+            console.print(f"[green]Wrote {len(written_cards)} remediation card(s) to {out_dir}[/]")
+    if "md-single" in exports:
+        single_path = render_remediation_cards_single(report.entries, out_dir / "remediation.md")
+        console.print(f"[green]Wrote single remediation file to {single_path}[/]")
+    if "json" in exports:
+        json_path = export_report_json(report, out_dir / "triage-report.json")
         console.print(f"[green]Exported full report to {json_path}[/]")
-    elif export_format == "md-single":
-        single_path = out_dir / "remediation.md"
-        render_remediation_cards_single(report.entries, single_path, only_actionable=True)
-        console.print(f"[green]Exported single remediation file to {single_path}[/]")
+    if "sarif" in exports:
+        sarif_path = export_report_sarif(report, out_dir / "triage-report.sarif")
+        console.print(f"[green]Exported SARIF to {sarif_path}[/]")
+
+    if gate_threshold is not None:
+        gate = evaluate_gate(report, gate_threshold, fail_on_error=fail_on_error)
+        if not gate.passed:
+            console.print(f"[red]Gate failed:[/] {gate['reason']}.")
+            raise SystemExit(2)
+        console.print(
+            f"[green]Gate passed[/] (threshold {gate_threshold:g}, highest actionable risk {gate['max_risk']})."
+        )
+    elif report.errored_entries:
+        err_console.print(
+            f"[yellow]Warning:[/] {len(report.errored_entries)} finding(s) could not be triaged; "
+            "re-run with --cache to retry only those."
+        )
 
 
 @main.command(
@@ -518,15 +591,9 @@ def backlog(
         owner_rules=owner_rules or None,
         unowned_label=unowned_label,
     )
-    if output_path:
-        output = Path(output_path)
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(rendered, encoding="utf-8")
-        console.print(f"[green]Wrote prioritized backlog to {output}[/]")
-        if owner_source is not None:
-            console.print(f"[dim]Annotated backlog with CODEOWNERS from {owner_source}[/]")
-    else:
-        click.echo(rendered)
+    _write_or_echo(rendered, output_path, "Wrote prioritized backlog to")
+    if output_path and owner_source is not None:
+        console.print(f"[dim]Annotated backlog with CODEOWNERS from {owner_source}[/]")
 
 
 @main.command(
@@ -598,22 +665,16 @@ def owners(
         top=top,
         unowned_label=unowned_label,
     )
-    if output_path:
-        output = Path(output_path)
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(rendered, encoding="utf-8")
-        console.print(f"[green]Wrote owner summary to {output}[/]")
-    else:
-        click.echo(rendered)
+    _write_or_echo(rendered, output_path, "Wrote owner summary to")
 
 
 @main.command(
     epilog="""
 Examples:
-  vulnsift autofix --input vulnsift-output/triage-report.json --dry-run
-  vulnsift autofix --input report.json --list-only
-  vulnsift autofix --input report.json --min-risk 8 --max-fixes 3
-  vulnsift autofix --input report.json --open-pr
+  vulnsift autofix --input vulnsift-output/triage-report.json --list-only
+  vulnsift autofix --input report.json --dry-run
+  vulnsift autofix --input report.json --min-risk 8 --max-fixes 3 --min-confidence 8
+  vulnsift autofix --input report.json --open-pr --draft
 
 Note: --dry-run still calls the Anthropic API to generate patches; it only skips writing files/PRs.
 Use --list-only to print eligible findings without any API calls.
@@ -625,121 +686,139 @@ Use --list-only to print eligible findings without any API calls.
     is_flag=True,
     help="Call API to generate patches and print diffs; do not modify files or create PRs.",
 )
+@click.option("--list-only", is_flag=True, help="Print eligible findings (no API calls, no disk writes).")
 @click.option(
-    "--list-only",
-    is_flag=True,
-    help="Print eligible findings (no API calls, no disk writes).",
+    "--min-risk", type=click.FloatRange(0, 10), default=7.0, show_default=True, help="Minimum risk score to fix."
 )
-@click.option("--min-risk", type=float, default=7.0, help="Minimum risk score to attempt auto-fix (default: 7).")
-@click.option("--max-fixes", type=int, default=None, help="Cap how many findings to send to the model (order: report).")
-@click.option("--repo-root", type=click.Path(exists=True), default=".", help="Repository root (default: current dir).")
-@click.option("--open-pr", is_flag=True, help="Create a GitHub PR for each fix (requires gh CLI).")
-@click.option("--verbose", "-v", is_flag=True, help="Verbose output.")
+@click.option(
+    "--min-confidence",
+    type=click.IntRange(0, 10),
+    default=7,
+    show_default=True,
+    help="Only apply patches the model rates at least this confident.",
+)
+@click.option("--max-fixes", type=click.IntRange(min=1), default=None, help="Cap how many findings to send.")
+@click.option("--repo-root", type=click.Path(exists=True, file_okay=False), default=".", help="Repository root.")
+@click.option("--model", default=None, help="Claude model ID (default: from config or claude-opus-5-5).")
+@click.option(
+    "--open-pr",
+    is_flag=True,
+    help="Open one PR per fix from the current branch (requires a clean git tree and the gh CLI).",
+)
+@click.option("--draft", is_flag=True, help="With --open-pr, open the PRs as drafts.")
+@click.option("--verbose", "-v", is_flag=True, help="Verbose output (prints diffs of applied patches).")
 def autofix(
     input_path: str,
     dry_run: bool,
     list_only: bool,
     min_risk: float,
+    min_confidence: int,
     max_fixes: int | None,
     repo_root: str,
+    model: str | None,
     open_pr: bool,
+    draft: bool,
     verbose: bool,
 ) -> None:
     """Generate AI-powered code patches for high-risk findings (sends source code to the model)."""
-    from vulnsift.autofix.agent import autofix_report as run_autofix
-    from vulnsift.autofix.patches import generate_diff
+    from rich.markup import escape
+
+    from vulnsift.autofix import GitError, autofix_report, filter_eligible, open_fix_prs
+    from vulnsift.llm import UsageTracker, make_client
 
     report_obj = _load_triage_report(input_path)
-
-    cfg = load_config()
+    cfg = _config()
+    model = model or cfg.model
     root = Path(repo_root).resolve()
 
-    if list_only:
-        from vulnsift.autofix.agent import _filter_eligible
+    eligible = filter_eligible(report_obj.entries, min_risk)
+    if max_fixes is not None:
+        eligible = eligible[:max_fixes]
+    if not eligible:
+        console.print("[yellow]No eligible findings for auto-fix at this min-risk.[/]")
+        return
 
-        eligible = _filter_eligible(report_obj.entries, min_risk)
-        if max_fixes is not None and max_fixes > 0:
-            eligible = eligible[:max_fixes]
-        if not eligible:
-            console.print("[yellow]No eligible findings for auto-fix at this min-risk.[/]")
-            return
+    if list_only:
         console.print(f"[dim]{len(eligible)} eligible finding(s) (no API calls):[/]")
         for e in eligible:
             console.print(
-                f"  - [bold]{e.finding.id}[/] risk={e.triage.risk_score} "
-                f"{e.finding.location.file_path}:{e.finding.location.start_line or '?'}"
+                f"  - [bold]{escape(e.finding.id)}[/] risk={e.triage.risk_score} "
+                f"{escape(e.finding.location.file_path)}:{e.finding.location.start_line or '?'}"
             )
         return
 
-    if not dry_run:
-        _require_api_key(cfg)
+    if open_pr and dry_run:
+        _err_with_hint("--open-pr cannot be combined with --dry-run.")
+    if open_pr:
+        from vulnsift.autofix.github_pr import ensure_clean_worktree
 
-    console.print(f"[dim]Auto-fixing findings with risk >= {min_risk} in {root}[/]")
-    console.print(
-        "[dim]Autofix sends finding metadata and full source files to the Anthropic API.[/]"
-    )
+        try:
+            ensure_clean_worktree(root)
+        except GitError as e:
+            _err_with_hint(str(e), "Commit or stash your changes first; each fix gets its own branch and PR.")
 
-    if dry_run:
-        _require_api_key(cfg)
+    key = _require_api_key(cfg)
+    console.print(f"[dim]Auto-fixing {len(eligible)} finding(s) with risk >= {min_risk:g} in {root} using {model}.[/]")
+    console.print("[dim]Autofix sends finding metadata and full source files to the Anthropic API.[/]")
 
-    results = run_autofix(report_obj, root, dry_run=dry_run, min_risk=min_risk, max_fixes=max_fixes)
+    tracker = UsageTracker(model)
+    with progress_bar(console) as progress:
+        task = progress.add_task("Generating patches", total=len(eligible), detail="")
 
-    if not results:
-        console.print("[yellow]No eligible findings to auto-fix.[/]")
-        return
+        def on_progress(done: int, total: int, result) -> None:
+            progress.update(task, completed=done)
 
+        try:
+            results = autofix_report(
+                report_obj,
+                root,
+                client=make_client(key),
+                model=model,
+                # In PR mode patches are written on per-fix branches, never on the current checkout.
+                dry_run=dry_run or open_pr,
+                min_risk=min_risk,
+                min_confidence=min_confidence,
+                max_fixes=max_fixes,
+                tracker=tracker,
+                on_progress=on_progress,
+            )
+        except Exception as e:  # fatal API errors (auth, unknown model)
+            from vulnsift.llm import describe_api_error
+
+            _err_with_hint(f"Autofix aborted: {describe_api_error(e)}")
+
+    ready = [r for r in results if r.skipped_reason is None]
     for r in results:
-        confidence_color = "green" if r.confidence >= 7 else "yellow" if r.confidence >= 4 else "red"
+        color = "green" if r.confidence >= 7 else "yellow" if r.confidence >= 4 else "red"
         console.print(
-            f"\n[bold]{r.finding_id}[/] ({r.file_path}) "
-            f"— confidence [{confidence_color}]{r.confidence}/10[/]"
+            f"\n[bold]{escape(r.finding_id)}[/] ({escape(r.file_path)}) — confidence [{color}]{r.confidence}/10[/]"
         )
-        console.print(f"  {r.explanation}")
-
-        if dry_run:
-            diff = generate_diff(Path(r.file_path), r.original_snippet, r.patched_snippet)
-            if diff:
-                console.print(f"[dim]{diff}[/]")
+        if r.explanation:
+            console.print(f"  {escape(r.explanation)}")
+        if r.skipped_reason:
+            console.print(f"  [yellow]Skipped:[/] {escape(r.skipped_reason)}")
         elif r.applied:
-            console.print(f"  [green]Patch applied to {r.file_path}[/]")
+            console.print(f"  [green]Patch applied to {escape(r.file_path)}[/]")
+        if r.diff and (dry_run or verbose) and r.skipped_reason is None:
+            console.print(escape(r.diff), style="dim", highlight=False)
 
-    applied = [r for r in results if r.applied]
-    skipped = [r for r in results if not r.applied and not dry_run]
-
+    render_usage(tracker.summary(), model=model, console=console)
+    skipped = len(results) - len(ready)
     if dry_run:
-        console.print(f"\n[dim]Dry run: {len(results)} patch(es) generated, none applied.[/]")
-    else:
-        console.print(f"\n[green]{len(applied)} patch(es) applied[/]", end="")
-        if skipped:
-            console.print(f", [yellow]{len(skipped)} skipped (low confidence or validation errors)[/]")
-        else:
-            console.print()
+        console.print(f"\n[dim]Dry run: {len(ready)} patch(es) ready, {skipped} skipped, none applied.[/]")
+    elif not open_pr:
+        console.print(f"\n[green]{sum(r.applied for r in results)} patch(es) applied[/], [yellow]{skipped} skipped[/]")
 
-    if open_pr and applied and not dry_run:
-        from vulnsift.autofix.github_pr import commit_and_push, create_fix_branch, get_current_branch, open_pull_request
-
-        base_branch = get_current_branch(root)
-        for r in applied:
-            try:
-                branch = create_fix_branch(root, r.finding_id)
-                commit_and_push(root, [root / r.file_path], f"fix: {r.explanation[:72]}")
-                pr_url = open_pull_request(
-                    root,
-                    title=f"fix: auto-remediate {r.finding_id}",
-                    body=(
-                        f"## Auto-fix by VulnSift\n\n"
-                        f"**Finding:** {r.finding_id}\n"
-                        f"**File:** {r.file_path}\n"
-                        f"**Confidence:** {r.confidence}/10\n\n"
-                        f"{r.explanation}\n\n"
-                        f"---\n*Generated by [VulnSift](https://github.com/kirilurbonas/VulnSift)*"
-                    ),
-                    base=base_branch,
-                    head=branch,
-                )
-                console.print(f"  [green]PR created: {pr_url}[/]")
-            except Exception as e:
-                console.print(f"  [red]Failed to create PR for {r.finding_id}: {e}[/]")
+    if open_pr and ready:
+        try:
+            outcomes = open_fix_prs(root, ready, draft=draft)
+        except GitError as e:
+            _err_with_hint(str(e))
+        for result, url, error in outcomes:
+            if url:
+                console.print(f"  [green]PR for {escape(result.finding_id)}:[/] {url}")
+            else:
+                console.print(f"  [red]Failed to open PR for {escape(result.finding_id)}:[/] {escape(error or '')}")
 
 
 @main.command(
@@ -753,21 +832,20 @@ Examples:
 @click.option("--input", "input_path", required=True, type=click.Path(exists=True), help="Triage report JSON file.")
 @click.option("--threshold", type=float, default=None, help="Gate threshold to display pass/fail badge.")
 @click.option(
+    "--fail-on-error/--allow-errors",
+    default=True,
+    help="Show the gate as failed when findings could not be triaged (default: yes).",
+)
+@click.option(
     "--output", "output_path", type=click.Path(), default=None, help="Write comment to file (default: stdout).",
 )
-def github_comment(input_path: str, threshold: float | None, output_path: str | None) -> None:
+def github_comment(input_path: str, threshold: float | None, fail_on_error: bool, output_path: str | None) -> None:
     """Render a GitHub PR comment from a triage report."""
     from vulnsift.output.github_comment import render_github_comment
 
     report_obj = _load_triage_report(input_path)
-    md = render_github_comment(report_obj, threshold=threshold)
-    if output_path:
-        out = Path(output_path)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(md, encoding="utf-8")
-        console.print(f"[green]Wrote PR comment to {out}[/]")
-    else:
-        click.echo(md)
+    md = render_github_comment(report_obj, threshold=threshold, fail_on_error=fail_on_error)
+    _write_or_echo(md, output_path, "Wrote PR comment to")
 
 
 @main.command(
@@ -779,16 +857,20 @@ Examples:
 )
 @click.option("--input", "input_path", required=True, type=click.Path(exists=True), help="Triage report JSON file.")
 @click.option("--db-path", type=click.Path(), default=None, help="Dashboard DB path (~/.vulnsift/dashboard.db).")
-def store(input_path: str, db_path: str | None) -> None:
+@click.option("--project", default=None, help="Project name (default: from the report, config, or 'default').")
+def store(input_path: str, db_path: str | None, project: str | None) -> None:
     """Store a triage report in the dashboard database."""
-    from vulnsift.dashboard.db import init_db, store_report
+    from vulnsift.dashboard.db import DEFAULT_DB_PATH, init_db, store_report
 
     report_obj = _load_triage_report(input_path)
+    project = project or report_obj.project or _config().project
 
-    conn = init_db(db_path) if db_path else init_db()
-    scan_id = store_report(conn, report_obj)
-    conn.close()
-    console.print(f"[green]Stored report as scan #{scan_id}[/]")
+    conn = init_db(db_path or DEFAULT_DB_PATH)
+    try:
+        scan_id = store_report(conn, report_obj, project=project)
+    finally:
+        conn.close()
+    console.print(f"[green]Stored report as scan #{scan_id}[/] (project: {project or 'default'})")
 
 
 @main.command(
@@ -799,22 +881,33 @@ Examples:
   vulnsift dashboard --db-path ./my-dashboard.db
 """,
 )
-@click.option("--port", type=int, default=8080, help="Port to serve on (default: 8080).")
-@click.option("--host", default="127.0.0.1", help="Host to bind to (default: 127.0.0.1).")
+@click.option("--port", type=click.IntRange(1, 65535), default=8080, show_default=True, help="Port to serve on.")
+@click.option("--host", default="127.0.0.1", show_default=True, help="Host to bind to.")
 @click.option("--db-path", type=click.Path(), default=None, help="Dashboard DB path (~/.vulnsift/dashboard.db).")
-def dashboard(port: int, host: str, db_path: str | None) -> None:
+@click.option(
+    "--token",
+    envvar="VULNSIFT_DASHBOARD_TOKEN",
+    default=None,
+    help="Bearer token required for uploading/deleting scans via the API (env: VULNSIFT_DASHBOARD_TOKEN).",
+)
+def dashboard(port: int, host: str, db_path: str | None, token: str | None) -> None:
     """Launch the VulnSift web dashboard."""
     try:
-        from vulnsift.dashboard.app import create_app
+        from vulnsift.dashboard.app import create_app, serve
     except ImportError:
         _err_with_hint(
             "Flask is required for the dashboard.",
-            "Install with: pip install vulnsift[dashboard]",
+            'Install with: pip install "vulnsift[dashboard]"',
         )
 
-    app = create_app(db_path=db_path)
+    if host not in ("127.0.0.1", "localhost", "::1") and not token:
+        err_console.print(
+            "[yellow]Warning:[/] binding to a non-loopback address without --token; "
+            "anyone who can reach it can upload or delete scans."
+        )
+    app = create_app(db_path=db_path, token=token)
     console.print(f"[green]VulnSift dashboard running at http://{host}:{port}[/]")
-    app.run(host=host, port=port, debug=False)
+    serve(app, host=host, port=port)
 
 
 if __name__ == "__main__":

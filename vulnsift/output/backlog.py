@@ -9,7 +9,8 @@ from pathlib import Path
 
 from vulnsift.analytics import get_backlog_items
 from vulnsift.codeowners import CodeownersRule, annotate_backlog_owners
-from vulnsift.models import TriageReport
+from vulnsift.models import MEDIUM_RISK_THRESHOLD, TriageReport
+from vulnsift.output.text import csv_safe, md_cell, md_code
 
 
 def render_backlog(
@@ -17,7 +18,7 @@ def render_backlog(
     *,
     export_format: str = "csv",
     top: int | None = None,
-    min_risk: float = 4,
+    min_risk: float = MEDIUM_RISK_THRESHOLD,
     owner_rules: list[CodeownersRule] | None = None,
     unowned_label: str = "(unowned)",
 ) -> str:
@@ -44,7 +45,7 @@ def write_backlog(
     *,
     export_format: str = "csv",
     top: int | None = None,
-    min_risk: float = 4,
+    min_risk: float = MEDIUM_RISK_THRESHOLD,
     owner_rules: list[CodeownersRule] | None = None,
     unowned_label: str = "(unowned)",
 ) -> Path:
@@ -124,7 +125,7 @@ def _render_csv(rows: list[dict[str, object]]) -> str:
     ]
     writer = csv.DictWriter(buffer, fieldnames=fieldnames)
     writer.writeheader()
-    writer.writerows(rows)
+    writer.writerows({k: csv_safe(v) for k, v in row.items()} for row in rows)
     return buffer.getvalue()
 
 
@@ -136,10 +137,11 @@ def _render_markdown(rows: list[dict[str, object]]) -> str:
         "|------|------|--------|------|------|---------------|",
     ]
     for row in rows:
-        line = f":{row['line']}" if row["line"] else ""
+        location = f"{row['file_path']}:{row['line']}" if row["line"] else str(row["file_path"])
         lines.append(
-            f"| {row['rank']} | {row['risk_score']} | {row.get('owners', '') or '-'} | `{row['rule_id']}` | "
-            f"`{row['file_path']}{line}` | {row['remediation_title'] or 'Review manually'} |"
+            f"| {row['rank']} | {row['risk_score']} | {md_cell(row.get('owners', '') or '-')} | "
+            f"{md_code(row['rule_id'])} | {md_code(location)} | "
+            f"{md_cell(row['remediation_title'] or 'Review manually')} |"
         )
     if not rows:
         lines.append("| - | - | - | - | - | No actionable findings at this threshold |")

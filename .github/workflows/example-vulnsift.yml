@@ -17,17 +17,19 @@ jobs:
       # 1. Check out the code
       - uses: actions/checkout@v4
 
-      # 2. Run your scanner (example: Semgrep)
+      # 2. Run your scanner (example: Semgrep, via its official container image).
+      #    `|| true` keeps the job going when Semgrep reports findings; VulnSift decides pass/fail.
       - name: Run Semgrep
-        uses: returntocorp/semgrep-action@v1
-        with:
-          config: auto
-          generateSarif: true
+        run: |
+          docker run --rm -v "${PWD}:/src" -w /src semgrep/semgrep \
+            semgrep scan --config auto --sarif --output semgrep.sarif || true
       # Produces: semgrep.sarif
 
-      # 3. Run VulnSift triage and post PR comment
+      # 3. Run VulnSift triage, post the PR comment and gate the build.
+      #    Pin to a release tag (e.g. @v0) or, for maximum supply-chain safety, a full commit SHA.
       - name: VulnSift Triage
-        uses: kirilurbonas/VulnSift@main
+        id: vulnsift
+        uses: kirilurbonas/VulnSift@v0
         with:
           scan-file: semgrep.sarif
           format: sarif

@@ -6,7 +6,7 @@ from html import escape
 
 from vulnsift.analytics import compare_reports, get_backlog_items, get_hotspots, summarize_report
 from vulnsift.codeowners import CodeownersRule, annotate_backlog_owners, summarize_by_owner
-from vulnsift.models import TriageReport
+from vulnsift.models import MEDIUM_RISK_THRESHOLD, TriageReport, TriageReportEntry, risk_band
 
 
 def render_html_report(
@@ -21,7 +21,7 @@ def render_html_report(
     """Render a standalone HTML artifact for sharing triage results."""
     summary = summarize_report(report)
     hotspots = get_hotspots(report, limit=top_n)
-    backlog = get_backlog_items(report, limit=top_n, min_risk=4)
+    backlog = get_backlog_items(report, limit=top_n, min_risk=MEDIUM_RISK_THRESHOLD)
     if owner_rules:
         backlog = annotate_backlog_owners(backlog, owner_rules, unowned_label=unowned_label)
     owner_summary = (
@@ -112,12 +112,15 @@ def render_html_report(
       --success: #166534;
       --success-bg: #dcfce7;
       --shadow: 0 20px 60px rgba(15, 23, 42, 0.08);
+      --hero-top: #eef5ff;
+      --error: #86198f;
+      --error-bg: #fae8ff;
     }}
     * {{ box-sizing: border-box; }}
     body {{
       margin: 0;
       font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: linear-gradient(180deg, #eef5ff 0%, var(--bg) 100%);
+      background: linear-gradient(180deg, var(--hero-top) 0%, var(--bg) 100%);
       color: var(--ink);
       line-height: 1.55;
     }}
@@ -258,6 +261,26 @@ def render_html_report(
       color: var(--muted);
     }}
     .footer {{ margin-top: 20px; color: var(--muted); font-size: 0.9rem; text-align: center; }}
+    @media (prefers-color-scheme: dark) {{
+      :root {{
+        --bg: #0b1220; --panel: #111a2c; --panel-soft: #16213a; --ink: #e5ecf6; --muted: #9aa8bd;
+        --line: #26334d; --accent: #2dd4bf; --danger: #fdba74; --danger-bg: #431407; --warning: #fcd34d;
+        --warning-bg: #422006; --success: #86efac; --success-bg: #052e16; --hero-top: #0f1b33;
+        --error: #f0abfc; --error-bg: #3b0764; --shadow: none;
+      }}
+    }}
+    details.finding {{ border: 1px solid var(--line); border-radius: 14px; margin: 10px 0;
+      background: var(--panel-soft); }}
+    details.finding summary {{ cursor: pointer; padding: 12px 14px; display: flex; gap: 10px; align-items: center;
+      flex-wrap: wrap; }}
+    details.finding .body {{ padding: 0 16px 14px; }}
+    details.finding h4 {{ margin: 12px 0 4px; font-size: 0.95rem; }}
+    details.finding p, details.finding li {{ color: var(--ink); line-height: 1.5; }}
+    details.finding pre {{ overflow-x: auto; padding: 10px; border-radius: 10px; background: var(--panel);
+      border: 1px solid var(--line); }}
+    .risk-err {{ background: var(--error-bg); color: var(--error); }}
+    .muted {{ color: var(--muted); }}
+    code {{ overflow-wrap: anywhere; }}
     @media (max-width: 900px) {{
       .card-grid, .card-grid.compact, .split {{
         grid-template-columns: 1fr;
@@ -289,6 +312,7 @@ def render_html_report(
         {_metric_card("Likely false positives", str(summary["false_positives"]))}
         {_metric_card("Highest risk", str(summary["highest_risk"]))}
         {_metric_card("Average actionable risk", str(summary["average_risk"]))}
+        {_metric_card("Could not be triaged", str(summary["errored_findings"])) if summary["errored_findings"] else ""}
       </div>
       <div class="pill-row">
         <span class="pill">High risk: {escape(str(risk_bands["high"]))}</span>
@@ -318,6 +342,16 @@ def render_html_report(
         </div>
         {_render_backlog_table(backlog)}
       </section>
+    </section>
+
+    <section class="panel">
+      <div class="section-head">
+        <div>
+          <h2>Findings</h2>
+          <p>Every actionable finding with the AI's reasoning and remediation. Click to expand.</p>
+        </div>
+      </div>
+      {_render_findings_detail(report)}
     </section>
 
     {owner_summary_html}
@@ -450,13 +484,74 @@ def _metric_card(label: str, value: str) -> str:
 
 
 def _risk_badge(score: int) -> str:
-    if score >= 7:
-        klass = "risk-high"
-    elif score >= 4:
-        klass = "risk-med"
+    band = risk_band(score)
+    klass = {"high": "risk-high", "medium": "risk-med", "low": "risk-low"}[band]
+    return f'<span class="risk {klass}" title="{band} risk">{escape(str(score))} {band}</span>'
+
+
+MAX_DETAILED_FINDINGS = 300
+
+
+def _safe_link(url: str) -> str:
+    if not url.startswith(("https://", "http://")):
+        return escape(url)
+    return f'<a href="{escape(url, quote=True)}" rel="noopener noreferrer">{escape(url)}</a>'
+
+
+def _render_finding(entry: TriageReportEntry) -> str:
+    f = entry.finding
+    loc = f.location.file_path or "(unknown file)"
+    if f.location.start_line is not None:
+        loc += f":{f.location.start_line}"
+    if entry.triage.is_error:
+        badge = '<span class="risk risk-err">error</span>'
     else:
-        klass = "risk-low"
-    return f'<span class="risk {klass}">{escape(str(score))}</span>'
+        badge = _risk_badge(entry.triage.risk_score)
+    card = entry.remediation
+    parts = [
+        '<details class="finding">',
+        f"<summary>{badge} <strong>{escape(card.title if card and card.title else f.title or f.rule_id)}</strong>"
+        f' <code class="muted">{escape(loc)}</code></summary>',
+        '<div class="body">',
+        f'<p class="muted">Rule <code>{escape(f.rule_id or f.id)}</code> · scanner severity {escape(f.severity or "-")}'
+        + (f" · {escape(f.cve)}" if f.cve else "")
+        + (f" · {escape(f.cwe)}" if f.cwe else "")
+        + (f" · confidence {entry.triage.confidence}/10" if entry.triage.confidence is not None else "")
+        + "</p>",
+    ]
+    if entry.triage.is_error:
+        parts.append(f"<p>Triage failed: {escape(entry.triage.error or '')}</p>")
+    if entry.triage.reasoning:
+        parts.append(f"<h4>Why</h4><p>{escape(entry.triage.reasoning)}</p>")
+    if entry.triage.exploitability_notes:
+        parts.append(f"<h4>Exploitability</h4><p>{escape(entry.triage.exploitability_notes)}</p>")
+    if card:
+        if card.business_impact:
+            parts.append(f"<h4>Business impact</h4><p>{escape(card.business_impact)}</p>")
+        if card.steps:
+            parts.append("<h4>Fix</h4><ol>" + "".join(f"<li>{escape(s)}</li>" for s in card.steps) + "</ol>")
+        if card.code_snippet:
+            parts.append(f"<pre><code>{escape(card.code_snippet)}</code></pre>")
+        if card.reference_links:
+            parts.append(
+                "<h4>References</h4><ul>" + "".join(f"<li>{_safe_link(u)}</li>" for u in card.reference_links) + "</ul>"
+            )
+    parts.append("</div></details>")
+    return "".join(parts)
+
+
+def _render_findings_detail(report: TriageReport) -> str:
+    shown = sorted(
+        (e for e in report.entries if e.is_actionable or e.triage.is_error),
+        key=lambda e: (not e.triage.is_error, -e.triage.risk_score, e.finding.id),
+    )
+    if not shown:
+        return '<div class="empty">No actionable findings.</div>'
+    extra = len(shown) - MAX_DETAILED_FINDINGS
+    html_parts = [_render_finding(e) for e in shown[:MAX_DETAILED_FINDINGS]]
+    if extra > 0:
+        html_parts.append(f'<p class="muted">… and {extra} more (see the JSON report).</p>')
+    return "".join(html_parts)
 
 
 def _scanner_mix(source_formats: object) -> str:

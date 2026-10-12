@@ -2,21 +2,23 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections import Counter, defaultdict
 from collections.abc import Iterable
 
-from vulnsift.models import TriageReport, TriageReportEntry
+from vulnsift.models import HIGH_RISK_THRESHOLD, MEDIUM_RISK_THRESHOLD, TriageReport, TriageReportEntry
 
 
 def actionable_entries(report: TriageReport) -> list[TriageReportEntry]:
-    """Return findings that are not marked as likely false positives."""
-    return [entry for entry in report.entries if not entry.triage.is_likely_false_positive]
+    """Return findings that were assessed and are not likely false positives (errored findings excluded)."""
+    return [entry for entry in report.entries if entry.is_actionable]
 
 
 def summarize_report(report: TriageReport) -> dict[str, object]:
     """Compute high-signal summary metrics for a triage report."""
     actionable = actionable_entries(report)
-    fp_count = len(report.entries) - len(actionable)
+    fp_count = sum(1 for entry in report.entries if entry.is_false_positive)
+    error_count = sum(1 for entry in report.entries if entry.triage.is_error)
     risk_scores = [entry.triage.risk_score for entry in actionable]
     source_formats = Counter((entry.finding.source_format or "unknown") for entry in report.entries)
     scanner_severities = Counter((entry.finding.severity or "unknown").lower() for entry in report.entries)
@@ -25,12 +27,13 @@ def summarize_report(report: TriageReport) -> dict[str, object]:
         "total_findings": len(report.entries),
         "actionable_findings": len(actionable),
         "false_positives": fp_count,
+        "errored_findings": error_count,
         "highest_risk": max(risk_scores, default=0),
         "average_risk": round(sum(risk_scores) / len(risk_scores), 1) if risk_scores else 0.0,
         "risk_bands": {
-            "high": sum(1 for score in risk_scores if score >= 7),
-            "medium": sum(1 for score in risk_scores if 4 <= score < 7),
-            "low": sum(1 for score in risk_scores if score < 4),
+            "high": sum(1 for score in risk_scores if score >= HIGH_RISK_THRESHOLD),
+            "medium": sum(1 for score in risk_scores if MEDIUM_RISK_THRESHOLD <= score < HIGH_RISK_THRESHOLD),
+            "low": sum(1 for score in risk_scores if score < MEDIUM_RISK_THRESHOLD),
         },
         "source_formats": dict(sorted(source_formats.items())),
         "scanner_severities": dict(sorted(scanner_severities.items())),
@@ -52,7 +55,7 @@ def get_hotspots(report: TriageReport, limit: int = 5) -> list[dict[str, object]
             {
                 "file_path": file_path,
                 "finding_count": len(entries),
-                "high_risk_count": sum(1 for score in scores if score >= 7),
+                "high_risk_count": sum(1 for score in scores if score >= HIGH_RISK_THRESHOLD),
                 "max_risk": max(scores, default=0),
                 "avg_risk": round(sum(scores) / len(scores), 1) if scores else 0.0,
                 "total_risk": sum(scores),
@@ -75,7 +78,7 @@ def get_priority_findings(
     report: TriageReport,
     limit: int = 5,
     *,
-    min_risk: float = 4,
+    min_risk: float = MEDIUM_RISK_THRESHOLD,
 ) -> list[dict[str, object]]:
     """Return the most urgent actionable findings with fix metadata."""
     backlog_items = get_backlog_items(report, limit=limit, min_risk=min_risk)
@@ -101,7 +104,7 @@ def get_backlog_items(
     report: TriageReport,
     limit: int | None = None,
     *,
-    min_risk: float = 4,
+    min_risk: float = MEDIUM_RISK_THRESHOLD,
 ) -> list[dict[str, object]]:
     """Return a prioritized backlog export with enough detail for tickets and reports."""
     priorities: list[dict[str, object]] = []
@@ -189,8 +192,8 @@ def compare_reports(current: TriageReport, baseline: TriageReport) -> dict[str, 
 
     risk_delta = int(current_summary["total_risk"]) - int(baseline_summary["total_risk"])
     actionable_delta = int(current_summary["actionable_findings"]) - int(baseline_summary["actionable_findings"])
-    new_high_risk = sum(1 for item in new_entries if int(item["risk_score"]) >= 7)
-    resolved_high_risk = sum(1 for item in resolved_entries if int(item["risk_score"]) >= 7)
+    new_high_risk = sum(1 for item in new_entries if int(item["risk_score"]) >= HIGH_RISK_THRESHOLD)
+    resolved_high_risk = sum(1 for item in resolved_entries if int(item["risk_score"]) >= HIGH_RISK_THRESHOLD)
 
     if not new_entries and not resolved_entries and risk_delta == 0:
         trend = "stable"
@@ -227,17 +230,22 @@ def compare_reports(current: TriageReport, baseline: TriageReport) -> dict[str, 
 
 
 def finding_identity(entry: TriageReportEntry) -> str:
-    """Build a stable identity for a finding across scan runs."""
+    """Build a stable identity for a finding across scan runs.
+
+    Line numbers are excluded so that unrelated edits shifting code up or down do not turn a
+    persisting finding into "new + resolved". The code snippet (when present) disambiguates
+    multiple hits of the same rule in the same file.
+    """
     finding = entry.finding
     location = finding.location
+    snippet = " ".join((location.snippet or "").split())
     parts = [
         _norm(finding.source_format),
         _norm(finding.rule_id) or _norm(finding.id),
         _norm(location.file_path),
-        str(location.start_line or ""),
-        str(location.end_line or ""),
         _norm(finding.cve),
         _norm(finding.cwe),
+        hashlib.sha1(snippet.encode("utf-8")).hexdigest()[:12] if snippet else "",
     ]
     if not any(parts):
         parts.extend([_norm(finding.title), _norm(finding.message)])
@@ -245,12 +253,15 @@ def finding_identity(entry: TriageReportEntry) -> str:
 
 
 def _entry_map(entries: Iterable[TriageReportEntry]) -> dict[str, TriageReportEntry]:
+    """Key entries by identity; repeated identities get an occurrence suffix (ordered by line)."""
     result: dict[str, TriageReportEntry] = {}
-    for entry in entries:
-        key = finding_identity(entry)
-        current = result.get(key)
-        if current is None or entry.triage.risk_score > current.triage.risk_score:
-            result[key] = entry
+    seen: Counter[str] = Counter()
+    ordered = sorted(entries, key=lambda e: (finding_identity(e), e.finding.location.start_line or 0, e.finding.id))
+    for entry in ordered:
+        base = finding_identity(entry)
+        n = seen[base]
+        seen[base] += 1
+        result[base if n == 0 else f"{base}#{n}"] = entry
     return result
 
 
@@ -268,3 +279,37 @@ def _entry_snapshot(entry: TriageReportEntry) -> dict[str, object]:
 
 def _norm(value: str | None) -> str:
     return (value or "").strip().lower()
+
+
+class GateResult(dict):
+    """Outcome of a CI gate check (a dict so it serialises to JSON directly)."""
+
+    @property
+    def passed(self) -> bool:
+        return bool(self["passed"])
+
+
+def evaluate_gate(report: TriageReport, threshold: float | None, *, fail_on_error: bool = True) -> GateResult:
+    """Evaluate the risk gate.
+
+    Fails when any actionable finding has risk >= threshold or, with fail_on_error, when any finding
+    could not be triaged (an unassessed finding must not let a build pass). No threshold -> always passes.
+    """
+    max_risk = max((e.triage.risk_score for e in report.entries if e.is_actionable), default=0)
+    errored = len(report.errored_entries)
+    if threshold is None:
+        return GateResult(passed=True, threshold=None, max_risk=max_risk, over_threshold=0, errored=errored, reason="")
+    over = sum(1 for e in report.entries if e.is_actionable and e.triage.risk_score >= threshold)
+    reasons = []
+    if over:
+        reasons.append(f"{over} actionable finding(s) with risk >= {threshold:g} (highest {max_risk})")
+    if fail_on_error and errored:
+        reasons.append(f"{errored} finding(s) could not be triaged")
+    return GateResult(
+        passed=not reasons,
+        threshold=threshold,
+        max_risk=max_risk,
+        over_threshold=over,
+        errored=errored,
+        reason="; ".join(reasons),
+    )

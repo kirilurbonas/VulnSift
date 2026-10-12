@@ -2,20 +2,23 @@
 
 from __future__ import annotations
 
+from rich.console import Console
+from rich.markup import escape
+from rich.panel import Panel
+from rich.progress import (
+    BarColumn,
+    MofNCompleteColumn,
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    TimeElapsedColumn,
+    TimeRemainingColumn,
+)
+from rich.table import Table
+
 from vulnsift.analytics import get_hotspots, get_priority_findings, summarize_report
 from vulnsift.codeowners import CodeownersRule, summarize_by_owner
-from vulnsift.models import TriageReport
-
-try:
-    from rich.console import Console
-    from rich.panel import Panel
-    from rich.progress import Progress, SpinnerColumn, TextColumn
-    from rich.table import Table
-except ImportError:
-    Console = None  # type: ignore
-    Table = None
-    Progress = None
-    Panel = None
+from vulnsift.models import HIGH_RISK_THRESHOLD, MEDIUM_RISK_THRESHOLD, TriageReport, UsageSummary
 
 
 def render_summary_table(
@@ -26,53 +29,70 @@ def render_summary_table(
 ) -> None:
     """
     Render a colour-coded summary table of triaged findings.
-    By default excludes entries marked as likely false positive from the table.
+    By default excludes likely false positives. Findings whose triage failed are always shown.
     """
-    if Console is None or Table is None:
-        print("Rich not installed; skipping table.")
-        return
-
     cons = console or Console()
     entries = report.entries
     if not include_false_positives:
-        entries = [e for e in entries if not e.triage.is_likely_false_positive]
-    entries = sorted(entries, key=lambda e: (-e.triage.risk_score, e.finding.id))
+        entries = [e for e in entries if not e.is_false_positive]
+    entries = sorted(entries, key=lambda e: (not e.triage.is_error, -e.triage.risk_score, e.finding.id))
+    hidden = len(report.entries) - len(entries)
+
+    if not entries:
+        cons.print("[green]No actionable findings.[/]" + (f" [dim]({hidden} likely false positive(s) hidden)[/]"
+                                                         if hidden else ""))
+        return
 
     table = Table(title="VulnSift Triage Summary", show_header=True, header_style="bold")
     table.add_column("Risk", justify="right", style="bold")
-    table.add_column("ID", max_width=24)
-    table.add_column("Title", max_width=50)
+    table.add_column("Sev", max_width=8)
+    table.add_column("Rule", max_width=28, overflow="ellipsis")
+    table.add_column("Title", max_width=50, overflow="ellipsis")
     table.add_column("FP?", justify="center")
-    table.add_column("Location")
+    table.add_column("Location", max_width=40, overflow="ellipsis")
 
     for e in entries:
-        risk = str(e.triage.risk_score)
-        if e.triage.risk_score >= 7:
-            risk_style = "red bold"
-        elif e.triage.risk_score >= 4:
-            risk_style = "yellow"
-        else:
-            risk_style = "green"
-        fp = "Yes" if e.triage.is_likely_false_positive else "No"
         loc = e.finding.location.file_path or "-"
         if e.finding.location.start_line is not None:
             loc = f"{loc}:{e.finding.location.start_line}"
+        if e.triage.is_error:
+            risk_cell, fp_cell = "[magenta bold]ERR[/]", "[magenta]?[/]"
+        else:
+            risk_cell = _risk_markup(e.triage.risk_score)
+            fp_cell = "Yes" if e.triage.is_likely_false_positive else "No"
         table.add_row(
-            f"[{risk_style}]{risk}[/]",
-            e.finding.id[:24] if e.finding.id else "-",
-            (e.finding.title or "-")[:50],
-            fp,
-            loc[:40] + "..." if len(loc) > 40 else loc,
+            risk_cell,
+            escape((e.finding.severity or "-").lower()[:8]),
+            escape(e.finding.rule_id or e.finding.id or "-"),
+            escape(e.finding.title or "-"),
+            fp_cell,
+            escape(loc),
         )
 
     cons.print(table)
+    if hidden:
+        cons.print(f"[dim]{hidden} likely false positive(s) hidden; use --include-fp to show them.[/]")
+    errored = report.errored_entries
+    if errored:
+        cons.print(f"[magenta]{len(errored)} finding(s) could not be triaged (shown as ERR).[/] "
+                   f"[dim]First error: {escape(errored[0].triage.error or '')}[/]")
+
+
+def render_usage(usage: UsageSummary | None, *, model: str, console: Console | None = None) -> None:
+    """One-line token/cost summary for a triage or autofix run."""
+    if usage is None or usage.requests == 0:
+        return
+    cons = console or Console()
+    cost = f" ≈ ${usage.estimated_cost_usd:.2f}" if usage.estimated_cost_usd is not None else ""
+    cached = f", {usage.cache_read_input_tokens:,} cached" if usage.cache_read_input_tokens else ""
+    cons.print(
+        f"[dim]{escape(model)}: {usage.requests} request(s), {usage.input_tokens:,} input{cached}, "
+        f"{usage.output_tokens:,} output tokens{cost}[/]"
+    )
 
 
 def render_report_insights(report: TriageReport, *, top_n: int = 5, console: Console | None = None) -> None:
     """Render a compact overview plus hotspots and immediate priorities."""
-    if Console is None or Table is None:
-        return
-
     cons = console or Console()
     summary = summarize_report(report)
     risk_bands = summary["risk_bands"]
@@ -83,6 +103,8 @@ def render_report_insights(report: TriageReport, *, top_n: int = 5, console: Con
     overview.add_column("Value")
     overview.add_row("Actionable findings", str(summary["actionable_findings"]))
     overview.add_row("Likely false positives", str(summary["false_positives"]))
+    if summary["errored_findings"]:
+        overview.add_row("Triage errors", f"[magenta]{summary['errored_findings']}[/]")
     overview.add_row("Highest risk", str(summary["highest_risk"]))
     overview.add_row("Average actionable risk", str(summary["average_risk"]))
     overview.add_row(
@@ -93,10 +115,7 @@ def render_report_insights(report: TriageReport, *, top_n: int = 5, console: Con
         "Scanner mix",
         ", ".join(f"{name}:{count}" for name, count in source_formats.items()) or "-",
     )
-    if Panel is not None:
-        cons.print(Panel(overview, border_style="cyan", expand=False))
-    else:
-        cons.print(overview)
+    cons.print(Panel(overview, border_style="cyan", expand=False))
 
     hotspots = get_hotspots(report, limit=top_n)
     if hotspots:
@@ -114,7 +133,7 @@ def render_report_insights(report: TriageReport, *, top_n: int = 5, console: Con
                 str(hotspot["high_risk_count"]),
                 str(hotspot["max_risk"]),
                 str(hotspot["avg_risk"]),
-                ", ".join(hotspot["top_rule_ids"]) or "-",
+                escape(", ".join(hotspot["top_rule_ids"]) or "-"),
             )
         cons.print(table)
 
@@ -144,9 +163,6 @@ def render_comparison_summary(
     console: Console | None = None,
 ) -> None:
     """Render a baseline comparison with regressions and progress."""
-    if Console is None or Table is None:
-        return
-
     cons = console or Console()
     summary = comparison["summary"]
     trend = comparison["trend"]
@@ -163,10 +179,7 @@ def render_comparison_summary(
     overview.add_row("Resolved actionable", str(summary["resolved_actionable"]))
     overview.add_row("New high risk", str(summary["new_high_risk"]))
     overview.add_row("Resolved high risk", str(summary["resolved_high_risk"]))
-    if Panel is not None:
-        cons.print(Panel(overview, border_style=trend_style, expand=False))
-    else:
-        cons.print(overview)
+    cons.print(Panel(overview, border_style=trend_style, expand=False))
 
     _render_change_table(
         cons,
@@ -211,9 +224,6 @@ def render_owner_summary_table(
     console: Console | None = None,
 ) -> None:
     """Render owner rollups from CODEOWNERS."""
-    if Console is None or Table is None:
-        return
-
     cons = console or Console()
     rows = summarize_by_owner(
         report,
@@ -245,30 +255,20 @@ def render_owner_summary_table(
     cons.print(table)
 
 
-def progress_spinner(console: Console | None = None):
-    """Context manager for a Rich progress spinner (e.g. during triage)."""
-    if Progress is None:
-        return _noop_context()
-    cons = console or Console()
+def progress_bar(console: Console | None = None) -> Progress:
+    """Progress bar with count, elapsed time and ETA (used during triage)."""
     return Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
-        console=cons,
+        BarColumn(),
+        MofNCompleteColumn(),
+        TextColumn("[dim]{task.fields[detail]}"),
+        TimeElapsedColumn(),
+        TextColumn("eta"),
+        TimeRemainingColumn(),
+        console=console or Console(),
+        transient=False,
     )
-
-
-class _noop_context:
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        pass
-
-    def add_task(self, *args, **kwargs):
-        return None
-
-    def advance(self, task_id, advance=1):
-        pass
 
 
 def _render_change_table(
@@ -300,19 +300,18 @@ def _render_change_table(
 
 
 def _risk_markup(score: int) -> str:
-    if score >= 7:
+    if score >= HIGH_RISK_THRESHOLD:
         return f"[red bold]{score}[/]"
-    if score >= 4:
+    if score >= MEDIUM_RISK_THRESHOLD:
         return f"[yellow]{score}[/]"
     return f"[green]{score}[/]"
 
 
 def _truncate(value: str, length: int) -> str:
-    if len(value) <= length:
-        return value
-    if length <= 3:
-        return value[:length]
-    return value[: length - 3] + "..."
+    """Truncate and escape Rich markup (scanner/AI text must never be interpreted as markup)."""
+    if len(value) > length:
+        value = value[:length] if length <= 3 else value[: length - 3] + "..."
+    return escape(value)
 
 
 def _signed(value: int) -> str:

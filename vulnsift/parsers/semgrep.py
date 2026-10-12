@@ -2,10 +2,22 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
+from typing import Any
 
 from vulnsift.models import Location, UnifiedFinding
+from vulnsift.parsers._common import dedupe_ids, extract_cves, extract_cwes, load_json, safe_id, short_hash
+
+# Semgrep rule severities -> VulnSift scanner severity. Newer rules may already use critical/high/...
+SEVERITY_MAP = {
+    "ERROR": "high",
+    "WARNING": "medium",
+    "INFO": "low",
+    "INVENTORY": "info",
+    "EXPERIMENT": "info",
+}
+# Placeholder Semgrep emits for `lines` / `fingerprint` when not logged in.
+_LOGIN_PLACEHOLDER = "requires login"
 
 
 def parse_semgrep(path: str | Path) -> list[UnifiedFinding]:
@@ -13,15 +25,7 @@ def parse_semgrep(path: str | Path) -> list[UnifiedFinding]:
     Parse Semgrep scan --json output into a list of UnifiedFinding.
     Expects top-level keys: results, paths (with _comment or scanned), errors, version.
     """
-    path = Path(path)
-    if not path.exists():
-        raise FileNotFoundError(f"Semgrep file not found: {path}")
-
-    raw = path.read_text(encoding="utf-8", errors="replace")
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Invalid JSON in Semgrep file: {e}") from e
+    data = load_json(path, "Semgrep")
 
     if not isinstance(data, dict):
         raise ValueError("Semgrep root must be a JSON object")
@@ -41,71 +45,95 @@ def parse_semgrep(path: str | Path) -> list[UnifiedFinding]:
     for i, res in enumerate(results):
         if not isinstance(res, dict):
             continue
-        finding = _result_to_finding(res, i, path_list)
-        findings.append(finding)
+        findings.append(_result_to_finding(res, i, path_list))
 
-    return findings
+    return dedupe_ids(findings)
+
+
+def map_severity(value: Any) -> str:
+    sev = str(value or "WARNING").upper()
+    return SEVERITY_MAP.get(sev, sev.lower())
+
+
+def _as_list(value: Any) -> list:
+    if value is None:
+        return []
+    return value if isinstance(value, list) else [value]
 
 
 def _result_to_finding(res: dict, index: int, path_list: list) -> UnifiedFinding:
-    check_id = res.get("check_id") or res.get("rule_id") or ""
+    check_id = str(res.get("check_id") or res.get("rule_id") or "")
     path_val = res.get("path")
     if path_val is not None and isinstance(path_val, int) and 0 <= path_val < len(path_list):
         file_path = str(path_list[path_val])
     else:
         file_path = str(path_val) if path_val else ""
 
-    extra = res.get("extra") or {}
-    if isinstance(extra, dict):
-        message = extra.get("message") or ""
-        severity = (extra.get("severity") or "WARNING").upper()
-        metadata = extra.get("metadata") or {}
-    else:
-        message = ""
-        severity = "WARNING"
-        metadata = {}
+    extra = res.get("extra") if isinstance(res.get("extra"), dict) else {}
+    message = str(extra.get("message") or "").strip()
+    scanner_severity = extra.get("severity") or "WARNING"
+    metadata = extra.get("metadata") if isinstance(extra.get("metadata"), dict) else {}
 
-    if isinstance(metadata, dict):
-        cwe = metadata.get("cwe")
-        cve = metadata.get("cve")
-        if isinstance(cwe, list):
-            cwe = cwe[0] if cwe else None
-        if isinstance(cve, list):
-            cve = cve[0] if cve else None
-        cwe = str(cwe) if cwe else None
-        cve = str(cve) if cve else None
-    else:
-        cwe = None
-        cve = None
+    cwes = extract_cwes(_as_list(metadata.get("cwe")))
+    cves = extract_cves([*_as_list(metadata.get("cve")), *_as_list(metadata.get("cves")), check_id])
+    owasp = [str(o) for o in _as_list(metadata.get("owasp")) if o]
+    references = [str(r) for r in _as_list(metadata.get("references")) if r]
+    if metadata.get("source"):
+        references.append(str(metadata["source"]))
 
-    start = res.get("start") or {}
-    end = res.get("end") or {}
-    if isinstance(start, dict):
-        start_line = start.get("line")
-    else:
-        start_line = None
-    if isinstance(end, dict):
-        end_line = end.get("line")
-    else:
-        end_line = None
+    start = res.get("start") if isinstance(res.get("start"), dict) else {}
+    end = res.get("end") if isinstance(res.get("end"), dict) else {}
+    start_line = start.get("line") if isinstance(start.get("line"), int) else None
+    end_line = end.get("line") if isinstance(end.get("line"), int) else start_line
 
-    loc = Location(
-        file_path=file_path,
-        start_line=start_line,
-        end_line=end_line,
+    snippet = extra.get("lines")
+    snippet = str(snippet).rstrip("\n") if snippet and str(snippet).strip() != _LOGIN_PLACEHOLDER else None
+
+    loc = Location(file_path=file_path, start_line=start_line, end_line=end_line, snippet=snippet)
+
+    desc_lines = [message] if message else []
+    detail = []
+    if cwes:
+        detail.append("CWE: " + ", ".join(str(c) for c in _as_list(metadata.get("cwe"))))
+    if owasp:
+        detail.append(f"OWASP: {', '.join(owasp)}")
+    for key in ("category", "confidence", "likelihood", "impact"):
+        if metadata.get(key):
+            detail.append(f"{key.capitalize()}: {metadata[key]}")
+    if extra.get("fix"):
+        detail.append(f"Suggested fix: {extra['fix']}")
+    if references:
+        detail.append("References:\n" + "\n".join(f"- {r}" for r in references[:5]))
+    description = "\n\n".join([*desc_lines, "\n".join(detail)] if detail else desc_lines)
+
+    fingerprint = extra.get("fingerprint")
+    if fingerprint and str(fingerprint) != _LOGIN_PLACEHOLDER:
+        key = short_hash(check_id, file_path, fingerprint)
+    else:
+        key = short_hash(check_id, file_path, start_line, start.get("col"), message)
+    unique_id = safe_id(f"semgrep_{check_id.rsplit('.', 1)[-1]}_{key}")
+
+    raw = dict(res)
+    raw.update(
+        {
+            "scanner_severity": scanner_severity,
+            "cwes": cwes,
+            "cves": cves,
+            "owasp": owasp,
+            "references": references,
+        }
     )
 
-    unique_id = f"semgrep_{index}_{check_id}".replace("/", "_")[:80]
     return UnifiedFinding(
         id=unique_id,
         rule_id=check_id,
-        title=message[:200] if message else check_id,
-        message=message,
-        severity=severity.lower() if isinstance(severity, str) else "warning",
-        description=message,
-        cve=cve,
-        cwe=cwe,
+        title=message.splitlines()[0][:200] if message else check_id,
+        message=message or check_id,
+        severity=map_severity(scanner_severity),
+        description=description,
+        cve=cves[0] if cves else None,
+        cwe=cwes[0] if cwes else None,
         location=loc,
-        raw=res,
+        raw=raw,
         source_format="semgrep",
     )

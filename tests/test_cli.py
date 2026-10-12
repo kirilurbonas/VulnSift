@@ -4,6 +4,7 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
+from vulnsift import __version__
 from vulnsift.cli import main
 from vulnsift.models import Location, RemediationCard, TriageReport, TriageReportEntry, TriageResult, UnifiedFinding
 
@@ -349,7 +350,7 @@ def test_owners_command_outputs_table(tmp_path: Path) -> None:
 def test_version() -> None:
     result = runner.invoke(main, ["--version"])
     assert result.exit_code == 0
-    assert "0.2.0" in result.output
+    assert __version__ in result.output
 
 
 def test_triage_dry_run(sample_sarif_path: Path) -> None:
