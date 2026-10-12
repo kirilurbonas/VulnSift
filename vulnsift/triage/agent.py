@@ -1,107 +1,65 @@
-"""Claude API triage: call API, parse tool-use response into TriageResult + RemediationCard."""
+"""Claude API triage: one structured request per finding -> TriageResult + RemediationCard."""
 
 from __future__ import annotations
 
-import os
-from typing import Any
+import anthropic
 
-from anthropic import Anthropic
-from anthropic.types import MessageParam, ToolParam
+from vulnsift.llm import DEFAULT_MODEL, UsageTracker, make_client, structured_call
+from vulnsift.models import RemediationCard, TriageResult, UnifiedFinding
+from vulnsift.triage.prompts import SYSTEM_PROMPT, TriageOutput, build_user_prompt
 
-from vulnsift.models import (
-    RemediationCard,
-    TriageResult,
-    UnifiedFinding,
-)
-from vulnsift.triage.prompts import (
-    SYSTEM_PROMPT,
-    TOOL_SCHEMA,
-    build_user_prompt,
-)
+# Triage answers are short; this leaves ample room for adaptive thinking on top.
+TRIAGE_MAX_TOKENS = 16000
 
-DEFAULT_MODEL = "claude-sonnet-4-20250514"
-MAX_RETRIES = 2
+
+def _clamp(value: int, lo: int = 0, hi: int = 10) -> int:
+    return max(lo, min(hi, int(value)))
+
+
+def to_result(out: TriageOutput) -> tuple[TriageResult, RemediationCard]:
+    """Map the model's structured output to VulnSift models (scores clamped to 0-10)."""
+    triage = TriageResult(
+        risk_score=_clamp(out.risk_score),
+        is_likely_false_positive=out.is_likely_false_positive,
+        confidence=_clamp(out.confidence),
+        reasoning=out.reasoning.strip(),
+        exploitability_notes=out.exploitability_notes.strip(),
+    )
+    card = RemediationCard(
+        title=out.remediation_title.strip(),
+        business_impact=out.business_impact.strip(),
+        steps=[s.strip() for s in out.remediation_steps if s and s.strip()],
+        code_snippet=out.code_snippet.strip() or None,
+        reference_links=[u.strip() for u in out.reference_links if u.strip().startswith(("http://", "https://"))],
+    )
+    return triage, card
 
 
 def triage_finding(
     finding: UnifiedFinding,
     project_context: str | None = None,
     *,
+    client: anthropic.Anthropic | None = None,
     api_key: str | None = None,
     model: str = DEFAULT_MODEL,
+    effort: str | None = None,
     redact_code: bool = False,
+    tracker: UsageTracker | None = None,
 ) -> tuple[TriageResult, RemediationCard]:
-    """
-    Send one finding to Claude for triage. Returns (TriageResult, RemediationCard).
-    Raises on API or parsing errors after retries.
+    """Send one finding to Claude for triage. Returns (TriageResult, RemediationCard).
 
+    Transient API errors are retried by the SDK; anything still failing is raised to the caller.
     When redact_code is True, code snippets from the finding are not included in the prompt.
     """
-    key = api_key or os.environ.get("ANTHROPIC_API_KEY")
-    if not key:
-        raise RuntimeError(
-            "ANTHROPIC_API_KEY not set. Set the env var or pass api_key=."
-        )
-
-    tools: list[ToolParam] = [
-        {
-            "name": TOOL_SCHEMA["name"],
-            "description": TOOL_SCHEMA["description"],
-            "input_schema": TOOL_SCHEMA["input_schema"],
-        }
-    ]
-
-    user_content = build_user_prompt(finding, project_context, redact_code=redact_code)
-    messages: list[MessageParam] = [{"role": "user", "content": user_content}]
-
-    client = Anthropic(api_key=key)
-    last_error: Exception | None = None
-    for attempt in range(MAX_RETRIES + 1):
-        try:
-            response = client.messages.create(
-                model=model,
-                max_tokens=1024,
-                system=SYSTEM_PROMPT,
-                messages=messages,
-                tools=tools,
-                tool_choice={"type": "tool", "name": "submit_triage"},
-            )
-            return _parse_tool_use(response)
-        except Exception as e:
-            last_error = e
-            if attempt == MAX_RETRIES:
-                raise
-            continue
-
-    if last_error:
-        raise last_error
-    raise RuntimeError("Triage failed after retries")
-
-
-def _parse_tool_use(response: Any) -> tuple[TriageResult, RemediationCard]:
-    """Extract submit_triage tool use from response and map to TriageResult + RemediationCard."""
-    content = getattr(response, "content", []) or []
-    for block in content:
-        if getattr(block, "type", None) != "tool_use":
-            continue
-        if getattr(block, "name", None) != "submit_triage":
-            continue
-        inp = getattr(block, "input", None) or {}
-        if not isinstance(inp, dict):
-            continue
-        triage = TriageResult(
-            risk_score=int(inp.get("risk_score", 5)),
-            is_likely_false_positive=bool(inp.get("is_likely_false_positive", False)),
-            reasoning=str(inp.get("reasoning", "")),
-            exploitability_notes=str(inp.get("exploitability_notes", "")),
-        )
-        card = RemediationCard(
-            title=str(inp.get("remediation_title", "")),
-            business_impact=str(inp.get("business_impact", "")),
-            steps=[str(s) for s in (inp.get("remediation_steps") or [])],
-            code_snippet=str(inp["code_snippet"]) if inp.get("code_snippet") else None,
-            reference_links=[str(u) for u in (inp.get("reference_links") or [])],
-        )
-        return triage, card
-
-    raise ValueError("Claude response did not include submit_triage tool use")
+    client = client or make_client(api_key)
+    out = structured_call(
+        client,
+        model=model,
+        system=SYSTEM_PROMPT,
+        user=build_user_prompt(finding, project_context, redact_code=redact_code),
+        output_type=TriageOutput,
+        max_tokens=TRIAGE_MAX_TOKENS,
+        effort=effort,
+        tracker=tracker,
+    )
+    return to_result(out)

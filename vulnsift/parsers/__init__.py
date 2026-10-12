@@ -1,7 +1,9 @@
 """Parsers for SARIF and vendor scan formats -> UnifiedFinding."""
 
 from pathlib import Path
+from typing import Any
 
+from vulnsift.parsers._common import load_json
 from vulnsift.parsers.sarif import parse_sarif
 from vulnsift.parsers.semgrep import parse_semgrep
 from vulnsift.parsers.snyk import parse_snyk
@@ -14,6 +16,7 @@ __all__ = [
     "parse_trivy",
     "parse_scan_file",
     "detect_format",
+    "SUPPORTED_FORMATS",
 ]
 
 SUPPORTED_FORMATS = ("sarif", "snyk", "semgrep", "trivy")
@@ -21,47 +24,69 @@ SUPPORTED_FORMATS = ("sarif", "snyk", "semgrep", "trivy")
 
 def detect_format(path: str | Path) -> str:
     """
-    Detect scan format from file path and/or content. Returns one of sarif, snyk, semgrep, trivy.
-    Raises ValueError if format cannot be determined.
+    Detect scan format from file content. Returns one of sarif, snyk, semgrep, trivy.
+    Raises FileNotFoundError if the file is missing and ValueError if it is not JSON or not recognised.
     """
     path = Path(path)
-    if not path.exists():
-        raise FileNotFoundError(f"File not found: {path}")
+    data = load_json(path, "scan")
+    fmt = _detect_from_data(data)
+    if fmt is None:
+        raise ValueError(
+            f"Could not detect scan format for {path}. Supported formats: {', '.join(SUPPORTED_FORMATS)} "
+            "(SARIF 2.1.0, `snyk test --json`, `semgrep --json`, `trivy -f json`). "
+            "Pass --format sarif|snyk|semgrep|trivy to force one."
+        )
+    return fmt
 
-    raw = path.read_text(encoding="utf-8", errors="replace")
-    try:
-        import json
-        data = json.loads(raw)
-    except Exception as err:
-        raise ValueError(f"Cannot parse as JSON: {path}") from err
 
+def _detect_from_data(data: Any) -> str | None:
+    if isinstance(data, list):
+        items = [x for x in data if isinstance(x, dict)]
+        # Snyk --all-projects: list of project objects
+        if items and all(_is_snyk(x) for x in items):
+            return "snyk"
+        # Legacy Trivy: list of results with Target
+        if any(
+            "Target" in x
+            and ("Vulnerabilities" in x or "Misconfigurations" in x or "Secrets" in x or "Type" in x or "Class" in x)
+            for x in items
+        ):
+            return "trivy"
+        return None
     if not isinstance(data, dict):
-        # Trivy can be a list
-        if isinstance(data, list):
-            for item in data:
-                if isinstance(item, dict) and ("Results" in item or "Target" in item or "Vulnerabilities" in item):
-                    return "trivy"
-        raise ValueError("Unknown format: root is not an object")
+        return None
 
-    # SARIF
-    if data.get("$schema", "").lower().find("sarif") >= 0 or data.get("version") == "2.1.0":
-        runs = data.get("runs")
-        if isinstance(runs, list):
-            return "sarif"
+    # SARIF: $schema mentions sarif, or version + runs[]
+    schema = str(data.get("$schema") or "").lower()
+    runs = data.get("runs")
+    if isinstance(runs, list) and ("sarif" in schema or str(data.get("version") or "").startswith("2.")):
+        return "sarif"
 
-    # Snyk
-    if "vulnerabilities" in data and isinstance(data.get("vulnerabilities"), list):
-        return "snyk"
-
-    # Semgrep
-    if "results" in data and isinstance(data.get("results"), list):
-        return "semgrep"
-
-    # Trivy (object with Results)
-    if "Results" in data and isinstance(data.get("Results"), list):
+    # Trivy: SchemaVersion / ArtifactName, or Results[] (possibly null) whose items have Target
+    results_upper = data.get("Results")
+    if "SchemaVersion" in data and ("Results" in data or "ArtifactName" in data):
+        return "trivy"
+    if isinstance(results_upper, list) and all(isinstance(r, dict) and "Target" in r for r in results_upper):
         return "trivy"
 
-    raise ValueError(f"Could not detect format for {path}. Use --format sarif|snyk|semgrep|trivy.")
+    # Semgrep: results[] whose items have check_id (or empty results alongside errors/paths/version)
+    results = data.get("results")
+    if isinstance(results, list):
+        if any(isinstance(r, dict) and "check_id" in r for r in results):
+            return "semgrep"
+        if not results and ("paths" in data or "errors" in data):
+            return "semgrep"
+
+    if _is_snyk(data):
+        return "snyk"
+    return None
+
+
+def _is_snyk(obj: dict) -> bool:
+    if isinstance(obj.get("vulnerabilities"), list):
+        return True
+    # Errored / clean Snyk project entries
+    return "packageManager" in obj and ("ok" in obj or "dependencyCount" in obj)
 
 
 def parse_scan_file(path: str | Path, format: str) -> list:

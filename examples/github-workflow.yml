@@ -1,0 +1,44 @@
+# Example: Run VulnSift triage on PRs and post a risk summary comment.
+# Copy this workflow into your repository and adjust the scan step.
+
+name: VulnSift PR Triage
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  vulnsift:
+    name: VulnSift triage
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write  # post/update the VulnSift PR comment
+    steps:
+      # 1. Check out the code
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # 2. Run your scanner (example: Semgrep, via its official container image).
+      #    `|| true` keeps the job going when Semgrep reports findings; VulnSift decides pass/fail.
+      - name: Run Semgrep
+        run: |
+          docker run --rm -v "${PWD}:/src" -w /src semgrep/semgrep \
+            semgrep scan --config auto --sarif --output semgrep.sarif || true
+      # Produces: semgrep.sarif
+
+      # 3. Run VulnSift triage, post the PR comment and gate the build.
+      #    Pin to a release tag (e.g. @v0) or, for maximum supply-chain safety, a full commit SHA.
+      - name: VulnSift Triage
+        id: vulnsift
+        uses: kirilurbonas/VulnSift@v0
+        with:
+          scan-file: semgrep.sarif
+          format: sarif
+          threshold: "7"
+          context: "Python web application, public-facing API"
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          comment: "true"

@@ -1,0 +1,168 @@
+{
+  "SchemaVersion": 2,
+  "CreatedAt": "2026-09-30T10:12:44.123Z",
+  "ArtifactName": ".",
+  "ArtifactType": "filesystem",
+  "Metadata": { "ImageConfig": { "architecture": "", "created": "0001-01-01T00:00:00Z", "os": "", "rootfs": { "type": "", "diff_ids": null }, "config": {} } },
+  "Results": [
+    {
+      "Target": "package-lock.json",
+      "Class": "lang-pkgs",
+      "Type": "npm",
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-2021-23337",
+          "PkgID": "lodash@4.17.15",
+          "PkgName": "lodash",
+          "PkgPath": "node_modules/lodash/package.json",
+          "InstalledVersion": "4.17.15",
+          "FixedVersion": "4.17.21",
+          "Status": "fixed",
+          "SeveritySource": "ghsa",
+          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2021-23337",
+          "Title": "nodejs-lodash: command injection via template",
+          "Description": "Lodash versions prior to 4.17.21 are vulnerable to Command Injection via the template function.",
+          "Severity": "HIGH",
+          "CweIDs": ["CWE-94", "CWE-77"],
+          "CVSS": { "nvd": { "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:H/UI:N/S:U/C:H/I:H/A:H", "V3Score": 7.2 } },
+          "References": [
+            "https://github.com/lodash/lodash/commit/3469357cff396a26c363f8c1b5a91dde28ba4b1c",
+            "https://nvd.nist.gov/vuln/detail/CVE-2021-23337",
+            "https://avd.aquasec.com/nvd/cve-2021-23337"
+          ]
+        },
+        {
+          "VulnerabilityID": "GHSA-35jh-r3h4-6jhm",
+          "PkgName": "semver",
+          "InstalledVersion": "5.7.1",
+          "Severity": "MEDIUM",
+          "Title": "semver vulnerable to Regular Expression Denial of Service",
+          "Description": "Versions of semver before 7.5.2 are vulnerable to ReDoS.",
+          "VendorIDs": ["CVE-2022-25883"],
+          "References": ["https://github.com/advisories/GHSA-35jh-r3h4-6jhm"]
+        }
+      ]
+    },
+    {
+      "Target": "Dockerfile",
+      "Class": "config",
+      "Type": "dockerfile",
+      "MisconfSummary": { "Successes": 20, "Failures": 2 },
+      "Misconfigurations": [
+        {
+          "Type": "Dockerfile Security Check",
+          "ID": "DS002",
+          "AVDID": "AVD-DS-0002",
+          "Title": "Image user should not be 'root'",
+          "Description": "Running containers with 'root' user can lead to a container escape situation.",
+          "Message": "Specify at least 1 USER command in Dockerfile with non-root user as argument",
+          "Namespace": "builtin.dockerfile.DS002",
+          "Resolution": "Add 'USER <non root user name>' line to the Dockerfile",
+          "Severity": "HIGH",
+          "PrimaryURL": "https://avd.aquasec.com/misconfig/ds002",
+          "References": ["https://docs.docker.com/develop/develop-images/dockerfile_best-practices/", "https://avd.aquasec.com/misconfig/ds002"],
+          "Status": "FAIL",
+          "Layer": {},
+          "CauseMetadata": { "Provider": "Dockerfile", "Service": "general", "Code": { "Lines": null } }
+        },
+        {
+          "Type": "Dockerfile Security Check",
+          "ID": "DS026",
+          "AVDID": "AVD-DS-0026",
+          "Title": "No HEALTHCHECK defined",
+          "Description": "You should add HEALTHCHECK instruction in your docker container images.",
+          "Message": "Add HEALTHCHECK instruction in your Dockerfile",
+          "Severity": "LOW",
+          "Status": "PASS",
+          "CauseMetadata": { "Provider": "Dockerfile", "Service": "general" }
+        },
+        {
+          "Type": "Dockerfile Security Check",
+          "ID": "DS013",
+          "AVDID": "AVD-DS-0013",
+          "Title": "'RUN cd ...' to change directory",
+          "Description": "Use WORKDIR instead of proliferating instructions like 'RUN cd … && do-something'.",
+          "Message": "RUN should not be used to change directory: 'cd /app && npm ci'. Use 'WORKDIR' statement instead.",
+          "Resolution": "Use WORKDIR to change directory",
+          "Severity": "MEDIUM",
+          "PrimaryURL": "https://avd.aquasec.com/misconfig/ds013",
+          "Status": "FAIL",
+          "CauseMetadata": {
+            "Provider": "Dockerfile",
+            "Service": "general",
+            "StartLine": 9,
+            "EndLine": 9,
+            "Code": {
+              "Lines": [
+                { "Number": 9, "Content": "RUN cd /app && npm ci", "IsCause": true, "Annotation": "", "Truncated": false, "FirstCause": true, "LastCause": true }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Target": "deploy/terraform/main.tf",
+      "Class": "config",
+      "Type": "terraform",
+      "Misconfigurations": [
+        {
+          "Type": "Terraform Security Check",
+          "ID": "AVD-AWS-0086",
+          "AVDID": "AVD-AWS-0086",
+          "Title": "S3 Access block should block public ACL",
+          "Description": "S3 buckets should block public ACLs on buckets and any objects they contain.",
+          "Message": "No public access block so not blocking public acls",
+          "Resolution": "Enable blocking any PUT calls with a public ACL specified",
+          "Severity": "HIGH",
+          "PrimaryURL": "https://avd.aquasec.com/misconfig/avd-aws-0086",
+          "Status": "FAIL",
+          "CauseMetadata": {
+            "Resource": "aws_s3_bucket.uploads",
+            "Provider": "AWS",
+            "Service": "s3",
+            "StartLine": 12,
+            "EndLine": 15,
+            "Code": {
+              "Lines": [
+                { "Number": 12, "Content": "resource \"aws_s3_bucket\" \"uploads\" {", "IsCause": true },
+                { "Number": 13, "Content": "  bucket = \"acme-uploads\"", "IsCause": true },
+                { "Number": 14, "Content": "  acl    = \"public-read\"", "IsCause": true },
+                { "Number": 15, "Content": "}", "IsCause": true }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Target": "config/settings.py",
+      "Class": "secret",
+      "Secrets": [
+        {
+          "RuleID": "aws-access-key-id",
+          "Category": "AWS",
+          "Severity": "CRITICAL",
+          "Title": "AWS Access Key ID",
+          "StartLine": 22,
+          "EndLine": 22,
+          "Code": {
+            "Lines": [
+              { "Number": 21, "Content": "# credentials", "IsCause": false },
+              { "Number": 22, "Content": "AWS_ACCESS_KEY_ID = \"********************\"", "IsCause": true },
+              { "Number": 23, "Content": "", "IsCause": false }
+            ]
+          },
+          "Match": "AWS_ACCESS_KEY_ID = \"********************\"",
+          "Layer": {}
+        }
+      ]
+    },
+    {
+      "Target": "go.sum",
+      "Class": "lang-pkgs",
+      "Type": "gomod",
+      "Vulnerabilities": null
+    }
+  ]
+}

@@ -3,34 +3,25 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from click.testing import CliRunner
 
+from vulnsift.autofix.prompts import PatchEdit, PatchProposal
 from vulnsift.cli import main
 
 FIXTURE = Path(__file__).resolve().parent.parent / "fixtures" / "sample-triage-report.json"
 
 
 class TestAutofixCLI:
-    @patch("vulnsift.autofix.agent.Anthropic")
-    def test_dry_run(self, mock_cls, tmp_path: Path):
+    @patch("vulnsift.autofix.agent.structured_call")
+    def test_dry_run(self, mock_call, tmp_path: Path):
         """Dry-run should show diffs but not apply patches."""
-        mock_client = MagicMock()
-        mock_cls.return_value = mock_client
-
-        # Create mock response
-        tool_block = MagicMock()
-        tool_block.type = "tool_use"
-        tool_block.name = "submit_patch"
-        tool_block.input = {
-            "patched_code": 'cursor.execute("SELECT * FROM users WHERE id=?", (uid,))\n',
-            "explanation": "Used parameterised query.",
-            "confidence": 8,
-        }
-        response = MagicMock()
-        response.content = [tool_block]
-        mock_client.messages.create.return_value = response
+        mock_call.return_value = PatchProposal(
+            edits=[PatchEdit(old="original = 'code'", new="original = 'fixed'")],
+            explanation="Used parameterised query.",
+            confidence=8,
+        )
 
         # Create source files that the autofix agent expects
         for rel_path in ["src/db/queries.py", "src/web/search.py", "src/config/settings.py"]:
@@ -51,8 +42,10 @@ class TestAutofixCLI:
             env={"ANTHROPIC_API_KEY": "test-key"},
         )
 
-        assert result.exit_code == 0
+        assert result.exit_code == 0, result.output
         assert "patch" in result.output.lower() or "confidence" in result.output.lower()
+        for rel_path in ["src/db/queries.py", "src/web/search.py", "src/config/settings.py"]:
+            assert (tmp_path / rel_path).read_text(encoding="utf-8") == "original = 'code'\n"
 
     def test_no_eligible_findings(self, tmp_path: Path):
         """When min-risk is very high, no findings should match."""
@@ -64,7 +57,7 @@ class TestAutofixCLI:
                 "--input", str(FIXTURE),
                 "--dry-run",
                 "--repo-root", str(tmp_path),
-                "--min-risk", "11",
+                "--min-risk", "10",
             ],
             env={"ANTHROPIC_API_KEY": "test-key"},
         )

@@ -1,20 +1,25 @@
-"""Auto-fix agent: generate patches for triaged vulnerabilities using Claude."""
+"""Auto-fix agent: generate and apply minimal patches for triaged vulnerabilities using Claude."""
 
 from __future__ import annotations
 
-import os
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
-from anthropic import Anthropic
-from anthropic.types import MessageParam, ToolParam
+import anthropic
 
-from vulnsift.autofix.patches import validate_patch
-from vulnsift.autofix.prompts import (
-    AUTOFIX_SYSTEM_PROMPT,
-    SUBMIT_PATCH_TOOL,
-    build_autofix_prompt,
+from vulnsift.autofix.patches import (
+    MAX_SOURCE_SIZE,
+    PatchError,
+    apply_edits,
+    generate_diff,
+    read_source,
+    resolve_repo_path,
+    validate_patch,
+    write_atomic,
 )
+from vulnsift.autofix.prompts import AUTOFIX_SYSTEM_PROMPT, PatchProposal, build_autofix_prompt
+from vulnsift.llm import DEFAULT_MODEL, LLMError, UsageTracker, describe_api_error, is_fatal_api_error, make_client
+from vulnsift.llm import structured_call as structured_call  # re-exported so tests can patch it here
 from vulnsift.models import (
     AutofixResult,
     RemediationCard,
@@ -24,11 +29,25 @@ from vulnsift.models import (
     UnifiedFinding,
 )
 
-DEFAULT_MODEL = "claude-sonnet-4-20250514"
-MAX_RETRIES = 2
+__all__ = [
+    "AUTOFIX_MAX_TOKENS",
+    "DEFAULT_MIN_CONFIDENCE",
+    "MAX_SOURCE_SIZE",
+    "ProgressCallback",
+    "autofix_finding",
+    "autofix_report",
+    "filter_eligible",
+]
 
-# Maximum source file size to send to the model (chars).
-MAX_SOURCE_SIZE = 100_000
+AUTOFIX_MAX_TOKENS = 16000
+DEFAULT_MIN_CONFIDENCE = 7
+
+# on_progress(done, total, result): called after each eligible finding has been processed.
+ProgressCallback = Callable[[int, int, AutofixResult], None]
+
+
+def _clamp(value: int) -> int:
+    return max(0, min(10, int(value)))
 
 
 def autofix_finding(
@@ -37,152 +56,171 @@ def autofix_finding(
     remediation: RemediationCard,
     source_code: str,
     *,
-    api_key: str | None = None,
+    client: anthropic.Anthropic | None = None,
     model: str = DEFAULT_MODEL,
+    tracker: UsageTracker | None = None,
+    file_path: str | None = None,
 ) -> AutofixResult:
-    """Generate a patch for a single finding.
+    """Ask Claude for a patch for one finding and apply it in memory (never touches disk).
 
-    Calls Claude with the finding context, remediation guidance, and full source
-    file to produce a patched version of the code.
+    `source_code` should use '\\n' line endings. The returned result has `original_snippet` (the
+    source), `patched_snippet` (full new content) and `diff` filled in when the edits apply and
+    validate; otherwise `skipped_reason` explains why. API/LLM errors are raised to the caller.
     """
-    key = api_key or os.environ.get("ANTHROPIC_API_KEY")
-    if not key:
-        raise RuntimeError("ANTHROPIC_API_KEY not set. Set the env var or pass api_key=.")
-
-    user_content = build_autofix_prompt(
+    path = file_path or finding.location.file_path
+    client = client or make_client()
+    user = build_autofix_prompt(
         rule_id=finding.rule_id,
-        title=finding.title,
+        title=finding.title or finding.message,
         severity=finding.severity,
         description=finding.description,
         cwe=finding.cwe,
-        file_path=finding.location.file_path,
+        file_path=path,
         start_line=finding.location.start_line,
         snippet=finding.location.snippet,
         source_code=source_code,
         remediation_steps=remediation.steps,
         remediation_code_hint=remediation.code_snippet,
+        risk_score=triage.risk_score,
+        triage_reasoning=triage.reasoning or None,
     )
+    proposal = structured_call(
+        client,
+        model=model,
+        system=AUTOFIX_SYSTEM_PROMPT,
+        user=user,
+        output_type=PatchProposal,
+        max_tokens=AUTOFIX_MAX_TOKENS,
+        tracker=tracker,
+    )
+    result = AutofixResult(
+        finding_id=finding.id,
+        file_path=path,
+        original_snippet=source_code,
+        explanation=proposal.explanation.strip(),
+        confidence=_clamp(proposal.confidence),
+    )
+    if not proposal.edits:
+        result.skipped_reason = "model did not propose a fix"
+        return result
+    try:
+        patched = apply_edits(source_code, proposal.edits)
+    except PatchError as e:
+        result.skipped_reason = f"patch rejected: {e}"
+        return result
+    if patched == source_code:
+        result.skipped_reason = "patch makes no changes"
+        return result
+    result.patched_snippet = patched
+    result.diff = generate_diff(path, source_code, patched)
+    errors = validate_patch(Path(path), patched, source_code)
+    if errors:
+        result.skipped_reason = f"patch failed validation: {'; '.join(errors)}"
+    return result
 
-    tools: list[ToolParam] = [
-        {
-            "name": SUBMIT_PATCH_TOOL["name"],
-            "description": SUBMIT_PATCH_TOOL["description"],
-            "input_schema": SUBMIT_PATCH_TOOL["input_schema"],
-        }
+
+def filter_eligible(entries: list[TriageReportEntry], min_risk: float) -> list[TriageReportEntry]:
+    """Entries eligible for auto-fix: actionable (assessed, not FP), risk >= min_risk, with a file and remediation."""
+    return [
+        e
+        for e in entries
+        if e.is_actionable
+        and e.triage.risk_score >= min_risk
+        and e.finding.location.file_path
+        and e.remediation is not None
     ]
-    messages: list[MessageParam] = [{"role": "user", "content": user_content}]
-
-    client = Anthropic(api_key=key)
-    last_error: Exception | None = None
-    for attempt in range(MAX_RETRIES + 1):
-        try:
-            response = client.messages.create(
-                model=model,
-                max_tokens=4096,
-                system=AUTOFIX_SYSTEM_PROMPT,
-                messages=messages,
-                tools=tools,
-                tool_choice={"type": "tool", "name": "submit_patch"},
-            )
-            return _parse_patch_response(response, finding, source_code)
-        except Exception as e:
-            last_error = e
-            if attempt == MAX_RETRIES:
-                raise
-            continue
-
-    if last_error:
-        raise last_error
-    raise RuntimeError("Autofix failed after retries")
 
 
-def _parse_patch_response(
-    response: Any,
-    finding: UnifiedFinding,
-    source_code: str,
+_filter_eligible = filter_eligible  # backwards-compatible alias
+
+
+def _process_entry(
+    entry: TriageReportEntry,
+    root: Path,
+    *,
+    client: anthropic.Anthropic,
+    model: str,
+    dry_run: bool,
+    min_confidence: int,
+    tracker: UsageTracker | None,
 ) -> AutofixResult:
-    """Extract submit_patch tool use from response and build AutofixResult."""
-    content = getattr(response, "content", []) or []
-    for block in content:
-        if getattr(block, "type", None) != "tool_use":
-            continue
-        if getattr(block, "name", None) != "submit_patch":
-            continue
-        inp = getattr(block, "input", None) or {}
-        if not isinstance(inp, dict):
-            continue
-        return AutofixResult(
-            finding_id=finding.id,
-            file_path=finding.location.file_path,
-            original_snippet=source_code,
-            patched_snippet=str(inp.get("patched_code", "")),
-            explanation=str(inp.get("explanation", "")),
-            confidence=int(inp.get("confidence", 0)),
+    finding = entry.finding
+    result = AutofixResult(finding_id=finding.id, file_path=finding.location.file_path)
+    try:
+        target = resolve_repo_path(root, finding.location.file_path)
+        rel = target.relative_to(root).as_posix()
+        result.file_path = rel
+        source = read_source(target)
+        assert entry.remediation is not None  # guaranteed by filter_eligible
+        result = autofix_finding(
+            finding,
+            entry.triage,
+            entry.remediation,
+            source.content,
+            client=client,
+            model=model,
+            tracker=tracker,
+            file_path=rel,
         )
-    raise ValueError("Claude response did not include submit_patch tool use")
+        if result.skipped_reason is None and result.confidence < min_confidence:
+            result.skipped_reason = f"confidence {result.confidence}/10 is below min_confidence {min_confidence}"
+        if result.skipped_reason is None and not dry_run:
+            write_atomic(target, result.patched_snippet, newline=source.newline)
+            result.applied = True
+    except PatchError as e:
+        result.skipped_reason = str(e)
+    except LLMError as e:
+        result.skipped_reason = f"model error: {e}"
+    except OSError as e:
+        result.skipped_reason = f"file error: {e}"
+    except Exception as e:
+        if is_fatal_api_error(e):
+            raise
+        result.skipped_reason = f"API call failed: {describe_api_error(e)}"
+    return result
 
 
 def autofix_report(
     report: TriageReport,
-    repo_root: Path,
+    repo_root: Path | str,
     *,
+    client: anthropic.Anthropic | None = None,
+    model: str = DEFAULT_MODEL,
     dry_run: bool = False,
     min_risk: float = 7.0,
+    min_confidence: int = DEFAULT_MIN_CONFIDENCE,
     max_fixes: int | None = None,
-    api_key: str | None = None,
-    model: str = DEFAULT_MODEL,
+    tracker: UsageTracker | None = None,
+    on_progress: ProgressCallback | None = None,
 ) -> list[AutofixResult]:
-    """Generate patches for all eligible findings in a triage report.
+    """Generate (and unless dry_run, apply) patches for every eligible finding in a triage report.
 
-    Eligible = risk_score >= min_risk, not false positive, has a file path.
-    Returns a list of AutofixResult objects (one per eligible finding).
+    Returns one AutofixResult per eligible finding (capped at max_fixes, in report order). A result is
+    either applied (`applied=True`), ready but not written (dry_run, `skipped_reason is None`), or skipped
+    with `skipped_reason` set (unsafe path, binary/oversized file, ambiguous edit, failed validation,
+    confidence below min_confidence, per-finding API error, ...). Only fatal API errors (auth, permission,
+    unknown model) are raised. Nothing is written to disk when dry_run is True.
     """
-    eligible = _filter_eligible(report.entries, min_risk)
+    root = Path(repo_root).resolve()
+    eligible = filter_eligible(report.entries, min_risk)
     if max_fixes is not None and max_fixes > 0:
         eligible = eligible[:max_fixes]
+    if not eligible:
+        return []
+    client = client or make_client()
+
     results: list[AutofixResult] = []
-
-    for entry in eligible:
-        file_path = repo_root / entry.finding.location.file_path
-        if not file_path.is_file():
-            continue
-
-        source_code = file_path.read_text(encoding="utf-8", errors="replace")
-        if len(source_code) > MAX_SOURCE_SIZE:
-            continue
-
-        result = autofix_finding(
-            entry.finding,
-            entry.triage,
-            entry.remediation,  # type: ignore[arg-type]
-            source_code,
-            api_key=api_key,
+    for i, entry in enumerate(eligible, 1):
+        result = _process_entry(
+            entry,
+            root,
+            client=client,
             model=model,
+            dry_run=dry_run,
+            min_confidence=min_confidence,
+            tracker=tracker,
         )
-
-        # Validate the patch
-        errors = validate_patch(file_path, result.patched_snippet)
-        if errors:
-            result.confidence = 0
-            result.explanation += f" [Validation errors: {'; '.join(errors)}]"
-
-        if not dry_run and result.confidence > 0:
-            from vulnsift.autofix.patches import apply_patch
-
-            result.applied = apply_patch(file_path, source_code, result.patched_snippet)
-
         results.append(result)
-
+        if on_progress is not None:
+            on_progress(i, len(eligible), result)
     return results
-
-
-def _filter_eligible(entries: list[TriageReportEntry], min_risk: float) -> list[TriageReportEntry]:
-    """Return entries eligible for auto-fix."""
-    return [
-        e
-        for e in entries
-        if e.triage.risk_score >= min_risk
-        and not e.triage.is_likely_false_positive
-        and e.finding.location.file_path
-        and e.remediation is not None
-    ]

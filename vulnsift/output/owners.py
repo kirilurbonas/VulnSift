@@ -5,9 +5,11 @@ from __future__ import annotations
 import csv
 import json
 from io import StringIO
+from typing import Any
 
 from vulnsift.codeowners import CodeownersRule, summarize_by_owner
 from vulnsift.models import TriageReport
+from vulnsift.output.text import csv_safe, md_cell
 
 
 def render_owner_summary(
@@ -36,7 +38,7 @@ def render_owner_summary(
     raise ValueError(f"Unsupported owner export format: {export_format}")
 
 
-def _render_csv(rows: list[dict[str, object]]) -> str:
+def _render_csv(rows: list[dict[str, Any]]) -> str:
     buffer = StringIO()
     fieldnames = [
         "owners",
@@ -51,17 +53,16 @@ def _render_csv(rows: list[dict[str, object]]) -> str:
     writer = csv.DictWriter(buffer, fieldnames=fieldnames)
     writer.writeheader()
     for row in rows:
-        writer.writerow(
-            {
-                **row,
-                "top_files": " | ".join(str(item) for item in row["top_files"]),
-                "top_rules": " | ".join(str(item) for item in row["top_rules"]),
-            }
-        )
+        flat = {
+            **row,
+            "top_files": " | ".join(str(item) for item in row["top_files"]),
+            "top_rules": " | ".join(str(item) for item in row["top_rules"]),
+        }
+        writer.writerow({k: csv_safe(v) for k, v in flat.items()})
     return buffer.getvalue()
 
 
-def _render_markdown(rows: list[dict[str, object]]) -> str:
+def _render_markdown(rows: list[dict[str, Any]]) -> str:
     lines = [
         "# VulnSift owner summary",
         "",
@@ -70,8 +71,8 @@ def _render_markdown(rows: list[dict[str, object]]) -> str:
     ]
     for row in rows:
         lines.append(
-            f"| {row['owners']} | {row['finding_count']} | {row['high_risk_count']} | "
-            f"{row['max_risk']} | {', '.join(str(item) for item in row['top_files']) or '-'} |"
+            f"| {md_cell(row['owners'])} | {row['finding_count']} | {row['high_risk_count']} | "
+            f"{row['max_risk']} | {md_cell(', '.join(str(item) for item in row['top_files']) or '-')} |"
         )
     if not rows:
         lines.append("| No owner data found | 0 | 0 | 0 | - |")

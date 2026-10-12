@@ -1,0 +1,106 @@
+[
+  {
+    "vulnerabilities": [
+      {
+        "id": "SNYK-JS-LODASH-567746",
+        "title": "Prototype Pollution",
+        "CVSSv3": "CVSS:3.1/AV:N/AC:H/PR:H/UI:N/S:U/C:H/I:H/A:H/E:P",
+        "cvssScore": 7.2,
+        "description": "## Overview\n[lodash](https://www.npmjs.com/package/lodash) is a modern JavaScript utility library.\n\nAffected versions of this package are vulnerable to Prototype Pollution via the `setWith` and `set` functions.",
+        "severity": "high",
+        "identifiers": { "CVE": ["CVE-2020-8203"], "CWE": ["CWE-1321"], "GHSA": ["GHSA-p6mc-m468-83gw"] },
+        "packageName": "lodash",
+        "moduleName": "lodash",
+        "version": "4.17.15",
+        "language": "js",
+        "packageManager": "npm",
+        "semver": { "vulnerable": ["<4.17.16"] },
+        "fixedIn": ["4.17.16"],
+        "from": ["web-app@1.0.0", "lodash@4.17.15"],
+        "upgradePath": [false, "lodash@4.17.16"],
+        "isUpgradable": true,
+        "isPatchable": false,
+        "name": "lodash",
+        "references": [
+          { "title": "GitHub PR", "url": "https://github.com/lodash/lodash/pull/4759" },
+          { "title": "HackerOne Report", "url": "https://hackerone.com/reports/712065" }
+        ]
+      },
+      {
+        "id": "SNYK-JS-LODASH-567746",
+        "title": "Prototype Pollution",
+        "cvssScore": 7.2,
+        "description": "## Overview\n[lodash](https://www.npmjs.com/package/lodash) is a modern JavaScript utility library.\n\nAffected versions of this package are vulnerable to Prototype Pollution via the `setWith` and `set` functions.",
+        "severity": "high",
+        "identifiers": { "CVE": ["CVE-2020-8203"], "CWE": ["CWE-1321"] },
+        "packageName": "lodash",
+        "version": "4.17.15",
+        "fixedIn": ["4.17.16"],
+        "from": ["web-app@1.0.0", "webpack-dev-server@3.11.0", "http-proxy-middleware@0.19.1", "lodash@4.17.15"],
+        "upgradePath": [false, "webpack-dev-server@4.0.0", "http-proxy-middleware@1.0.0", "lodash@4.17.16"],
+        "isUpgradable": true,
+        "isPatchable": false,
+        "name": "lodash"
+      },
+      {
+        "id": "SNYK-JS-MINIMIST-2429795",
+        "title": "Prototype Pollution",
+        "cvssScore": 5.6,
+        "description": "Affected versions of minimist are vulnerable to Prototype Pollution via file `index.js`.",
+        "severity": "medium",
+        "identifiers": { "CVE": ["CVE-2021-44906"], "CWE": ["CWE-1321"] },
+        "packageName": "minimist",
+        "version": "1.2.5",
+        "fixedIn": ["1.2.6"],
+        "from": ["web-app@1.0.0", "mkdirp@0.5.5", "minimist@1.2.5"],
+        "upgradePath": [],
+        "isUpgradable": false,
+        "isPatchable": false,
+        "name": "minimist"
+      }
+    ],
+    "ok": false,
+    "dependencyCount": 412,
+    "org": "acme",
+    "packageManager": "npm",
+    "summary": "3 vulnerable dependency paths",
+    "projectName": "web-app",
+    "displayTargetFile": "web/package-lock.json",
+    "path": "/home/runner/work/monorepo"
+  },
+  {
+    "vulnerabilities": [
+      {
+        "id": "SNYK-PYTHON-JINJA2-6150717",
+        "title": "Cross-site Scripting (XSS)",
+        "cvssScore": 5.4,
+        "description": "Affected versions of this package are vulnerable to Cross-site Scripting (XSS) via the `xmlattr` filter.",
+        "severity": "medium",
+        "identifiers": { "CVE": ["CVE-2024-22195"], "CWE": ["CWE-79"] },
+        "packageName": "jinja2",
+        "version": "3.1.2",
+        "fixedIn": ["3.1.3"],
+        "from": ["api@0.0.0", "flask@2.2.5", "jinja2@3.1.2"],
+        "upgradePath": [],
+        "isUpgradable": false,
+        "isPatchable": false,
+        "name": "jinja2"
+      }
+    ],
+    "ok": false,
+    "dependencyCount": 37,
+    "packageManager": "pip",
+    "projectName": "api",
+    "targetFile": "api/requirements.txt",
+    "path": "/home/runner/work/monorepo"
+  },
+  {
+    "vulnerabilities": [],
+    "ok": true,
+    "dependencyCount": 3,
+    "packageManager": "gomodules",
+    "projectName": "tools",
+    "displayTargetFile": "tools/go.mod",
+    "path": "/home/runner/work/monorepo"
+  }
+]

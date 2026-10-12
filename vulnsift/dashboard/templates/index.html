@@ -2,959 +2,225 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="referrer" content="no-referrer">
 <title>VulnSift Dashboard</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
-<style>
-  :root {
-    --bg: #f5f0e4;
-    --bg-strong: #fffdf7;
-    --surface: rgba(255, 253, 247, 0.9);
-    --surface-strong: rgba(255, 255, 255, 0.96);
-    --line: rgba(24, 32, 43, 0.11);
-    --line-strong: rgba(24, 32, 43, 0.18);
-    --ink: #18202b;
-    --muted: #61707d;
-    --accent: #0f766e;
-    --accent-soft: #d8f2ee;
-    --danger: #d9485f;
-    --danger-soft: #ffe0e5;
-    --warning: #d97706;
-    --warning-soft: #ffe8c7;
-    --success: #2f855a;
-    --success-soft: #ddf8e7;
-    --shadow: 0 24px 70px rgba(24, 32, 43, 0.12);
-    --radius-xl: 28px;
-    --radius-lg: 20px;
-    --radius-md: 14px;
-  }
-
-  * {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
-  }
-
-  html {
-    scroll-behavior: smooth;
-  }
-
-  body {
-    min-height: 100vh;
-    color: var(--ink);
-    font-family: "Space Grotesk", "Segoe UI", sans-serif;
-    background:
-      radial-gradient(circle at top left, rgba(15, 118, 110, 0.18), transparent 32%),
-      radial-gradient(circle at top right, rgba(217, 72, 95, 0.14), transparent 22%),
-      linear-gradient(180deg, #fbf7ee 0%, var(--bg) 100%);
-    line-height: 1.55;
-    position: relative;
-  }
-
-  body::before {
-    content: "";
-    position: fixed;
-    inset: 0;
-    pointer-events: none;
-    background-image:
-      linear-gradient(rgba(24, 32, 43, 0.03) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(24, 32, 43, 0.03) 1px, transparent 1px);
-    background-size: 36px 36px;
-    mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.7), transparent 90%);
-  }
-
-  .page {
-    width: min(1320px, calc(100vw - 2rem));
-    margin: 0 auto;
-    padding: 1.5rem 0 2.5rem;
-    position: relative;
-    z-index: 1;
-  }
-
-  .hero {
-    display: grid;
-    grid-template-columns: minmax(0, 1.3fr) minmax(320px, 0.9fr);
-    gap: 1.25rem;
-    margin-bottom: 1.25rem;
-  }
-
-  .panel {
-    background: var(--surface);
-    backdrop-filter: blur(18px);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-xl);
-    box-shadow: var(--shadow);
-    overflow: hidden;
-  }
-
-  .hero-main {
-    padding: 2rem;
-    position: relative;
-    min-height: 280px;
-    background:
-      radial-gradient(circle at 80% 10%, rgba(15, 118, 110, 0.14), transparent 30%),
-      linear-gradient(135deg, rgba(255, 255, 255, 0.8), rgba(255, 248, 233, 0.85));
-  }
-
-  .hero-main::after {
-    content: "";
-    position: absolute;
-    right: -80px;
-    bottom: -80px;
-    width: 240px;
-    height: 240px;
-    background: linear-gradient(135deg, rgba(15, 118, 110, 0.18), rgba(217, 72, 95, 0.12));
-    border-radius: 999px;
-    filter: blur(10px);
-  }
-
-  .eyebrow {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.45rem;
-    padding: 0.4rem 0.75rem;
-    border-radius: 999px;
-    border: 1px solid rgba(15, 118, 110, 0.15);
-    background: rgba(255, 255, 255, 0.7);
-    color: var(--accent);
-    font-size: 0.78rem;
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    font-weight: 700;
-  }
-
-  .hero-main h1 {
-    font-size: clamp(2.2rem, 5vw, 4.4rem);
-    line-height: 0.94;
-    letter-spacing: -0.06em;
-    max-width: 10ch;
-    margin: 1rem 0 0.85rem;
-  }
-
-  .hero-main p {
-    max-width: 56ch;
-    color: var(--muted);
-    font-size: 1rem;
-  }
-
-  .hero-meta {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.9rem;
-    margin-top: 1.5rem;
-    max-width: 560px;
-  }
-
-  .meta-card {
-    padding: 1rem 1.05rem;
-    border-radius: var(--radius-md);
-    background: rgba(255, 255, 255, 0.68);
-    border: 1px solid rgba(24, 32, 43, 0.08);
-  }
-
-  .meta-card .label {
-    display: block;
-    color: var(--muted);
-    font-size: 0.8rem;
-    margin-bottom: 0.3rem;
-  }
-
-  .meta-card .value {
-    font-size: 1.05rem;
-    font-weight: 700;
-  }
-
-  .hero-side {
-    padding: 1.6rem;
-    display: grid;
-    gap: 1rem;
-    align-content: start;
-  }
-
-  .hero-side h2,
-  .section-title,
-  .mini-title {
-    font-size: 0.82rem;
-    text-transform: uppercase;
-    letter-spacing: 0.14em;
-    color: var(--muted);
-  }
-
-  .status-tile {
-    padding: 1rem 1.1rem;
-    border-radius: var(--radius-lg);
-    background: var(--surface-strong);
-    border: 1px solid var(--line);
-  }
-
-  .status-tile strong {
-    display: block;
-    margin-top: 0.35rem;
-    font-size: 1.8rem;
-    line-height: 1;
-    letter-spacing: -0.05em;
-  }
-
-  .delta-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-    margin-top: 0.8rem;
-  }
-
-  .delta-pill,
-  .band-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.45rem;
-    border-radius: 999px;
-    padding: 0.45rem 0.75rem;
-    font-size: 0.8rem;
-    font-weight: 700;
-  }
-
-  .delta-good,
-  .band-low {
-    background: var(--success-soft);
-    color: var(--success);
-  }
-
-  .delta-bad,
-  .band-critical {
-    background: var(--danger-soft);
-    color: var(--danger);
-  }
-
-  .delta-flat,
-  .band-medium {
-    background: var(--warning-soft);
-    color: var(--warning);
-  }
-
-  .stats-grid,
-  .chart-grid,
-  .split-grid {
-    display: grid;
-    gap: 1rem;
-    margin-bottom: 1rem;
-  }
-
-  .stats-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-
-  .chart-grid {
-    grid-template-columns: minmax(0, 1.5fr) minmax(320px, 0.85fr);
-  }
-
-  .split-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .stat-card,
-  .section-card {
-    padding: 1.3rem 1.35rem;
-    border-radius: var(--radius-lg);
-    background: var(--surface);
-    border: 1px solid var(--line);
-    box-shadow: 0 10px 30px rgba(24, 32, 43, 0.05);
-  }
-
-  .stat-card .value {
-    display: block;
-    margin-top: 0.45rem;
-    font-size: 2.4rem;
-    line-height: 1;
-    letter-spacing: -0.06em;
-    font-weight: 700;
-  }
-
-  .stat-card .sub {
-    margin-top: 0.65rem;
-    color: var(--muted);
-    font-size: 0.92rem;
-  }
-
-  .section-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 1rem;
-    margin-bottom: 1rem;
-  }
-
-  .section-head p {
-    color: var(--muted);
-    max-width: 48ch;
-    font-size: 0.95rem;
-  }
-
-  .mono {
-    font-family: "IBM Plex Mono", monospace;
-  }
-
-  .chart-wrap {
-    position: relative;
-    min-height: 280px;
-  }
-
-  canvas {
-    width: 100% !important;
-    height: 100% !important;
-  }
-
-  .list {
-    display: grid;
-    gap: 0.8rem;
-  }
-
-  .list-item {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 0.75rem;
-    padding: 0.95rem 1rem;
-    border-radius: var(--radius-md);
-    background: var(--surface-strong);
-    border: 1px solid var(--line);
-  }
-
-  .list-item strong {
-    font-size: 0.98rem;
-  }
-
-  .list-item p {
-    color: var(--muted);
-    margin-top: 0.25rem;
-    font-size: 0.9rem;
-  }
-
-  .risk-badge {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 3rem;
-    height: 2rem;
-    padding: 0 0.75rem;
-    border-radius: 999px;
-    font-weight: 700;
-    font-family: "IBM Plex Mono", monospace;
-    border: 1px solid transparent;
-  }
-
-  .risk-high {
-    color: var(--danger);
-    background: var(--danger-soft);
-    border-color: rgba(217, 72, 95, 0.18);
-  }
-
-  .risk-med {
-    color: var(--warning);
-    background: var(--warning-soft);
-    border-color: rgba(217, 119, 6, 0.18);
-  }
-
-  .risk-low {
-    color: var(--success);
-    background: var(--success-soft);
-    border-color: rgba(47, 133, 90, 0.18);
-  }
-
-  table {
-    width: 100%;
-    border-collapse: collapse;
-  }
-
-  th,
-  td {
-    padding: 0.8rem 0.55rem;
-    text-align: left;
-    border-bottom: 1px solid var(--line);
-    vertical-align: top;
-  }
-
-  th {
-    color: var(--muted);
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    font-size: 0.72rem;
-    font-weight: 700;
-  }
-
-  td {
-    font-size: 0.92rem;
-  }
-
-  tbody tr:hover {
-    background: rgba(15, 118, 110, 0.04);
-  }
-
-  code {
-    font-family: "IBM Plex Mono", monospace;
-    font-size: 0.83rem;
-  }
-
-  .footnote {
-    color: var(--muted);
-    font-size: 0.9rem;
-    padding: 0.75rem 0 0;
-  }
-
-  .empty {
-    padding: 2.3rem 1rem;
-    text-align: center;
-    color: var(--muted);
-    border: 1px dashed var(--line-strong);
-    border-radius: var(--radius-md);
-    background: rgba(255, 255, 255, 0.45);
-  }
-
-  .fade-in {
-    animation: rise 500ms ease both;
-  }
-
-  .fade-in.delay-1 { animation-delay: 80ms; }
-  .fade-in.delay-2 { animation-delay: 140ms; }
-  .fade-in.delay-3 { animation-delay: 200ms; }
-
-  @keyframes rise {
-    from {
-      opacity: 0;
-      transform: translateY(10px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .fade-in {
-      animation: none;
-    }
-  }
-
-  @media (max-width: 1080px) {
-    .hero,
-    .chart-grid,
-    .split-grid {
-      grid-template-columns: 1fr;
-    }
-
-    .stats-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-  }
-
-  @media (max-width: 700px) {
-    .page {
-      width: min(100vw - 1rem, 100%);
-      padding-top: 0.75rem;
-    }
-
-    .hero-main,
-    .hero-side,
-    .stat-card,
-    .section-card {
-      padding: 1.05rem;
-    }
-
-    .hero-meta,
-    .stats-grid {
-      grid-template-columns: 1fr;
-    }
-
-    .list-item {
-      grid-template-columns: 1fr;
-    }
-
-    th,
-    td {
-      padding-left: 0.25rem;
-      padding-right: 0.25rem;
-    }
-  }
-</style>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/app.js" defer></script>
 </head>
 <body>
-<main class="page">
-  <section class="hero">
-    <article class="panel hero-main fade-in">
-      <span class="eyebrow">VulnSift Control Room</span>
-      <h1>Ship fixes, not scanner noise.</h1>
-      <p id="hero-summary">
-        Scan history, risk concentration, and the next best fixes to ship.
-      </p>
-      <div class="hero-meta">
-        <div class="meta-card">
-          <span class="label">Latest source</span>
-          <span class="value mono" id="meta-source">Waiting for data</span>
-        </div>
-        <div class="meta-card">
-          <span class="label">Last stored scan</span>
-          <span class="value" id="meta-timestamp">-</span>
-        </div>
-      </div>
-    </article>
+<a class="skip-link" href="#explorer">Skip to findings</a>
 
-    <aside class="panel hero-side fade-in delay-1">
-      <div>
-        <h2>Latest scan pulse</h2>
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">VS</span>
+      <span class="brand-name">VulnSift</span>
+      <span class="eyebrow">Control Room</span>
+    </div>
+    <div class="controls" id="controls">
+      <label class="control">
+        <span class="control-label">Project</span>
+        <select id="project-select" aria-label="Project"></select>
+      </label>
+      <label class="control">
+        <span class="control-label">Scan</span>
+        <select id="scan-select" aria-label="Scan"></select>
+      </label>
+      <button type="button" class="btn" id="refresh-btn" aria-label="Refresh data">
+        <span aria-hidden="true">&#x21bb;</span> Refresh
+      </button>
+    </div>
+  </div>
+</header>
+
+<div class="banner-stack" id="banners" role="region" aria-live="polite" aria-label="Notifications"></div>
+
+<main class="page" id="main" aria-busy="true">
+  <section class="panel empty-state" id="empty-state" hidden>
+    <span class="eyebrow">Getting started</span>
+    <h1>No scans stored yet.</h1>
+    <p>Triage a scanner report, export it as JSON, then store it in the dashboard database:</p>
+    <pre class="cmd"><code>vulnsift triage --input results.sarif --export json
+vulnsift store --input vulnsift-output/triage-report.json</code></pre>
+    <p class="muted">Then press <strong>Refresh</strong>. The JSON report is written to <code>--output-dir</code> (default <code>./vulnsift-output</code>).</p>
+  </section>
+
+  <div id="dashboard">
+    <section class="hero">
+      <article class="panel hero-main">
+        <span class="eyebrow" id="hero-project">Project</span>
+        <h1>Ship fixes, not scanner noise.</h1>
+        <p id="hero-summary" class="hero-summary"><span class="skeleton-line"></span></p>
+        <dl class="hero-meta">
+          <div class="meta-card"><dt>Source</dt><dd class="mono" id="meta-source">&ndash;</dd></div>
+          <div class="meta-card"><dt>Stored</dt><dd id="meta-timestamp">&ndash;</dd></div>
+          <div class="meta-card"><dt>Model</dt><dd class="mono" id="meta-model">&ndash;</dd></div>
+          <div class="meta-card"><dt>Triage cost</dt><dd id="meta-cost">&ndash;</dd></div>
+        </dl>
+      </article>
+      <aside class="panel hero-side">
+        <h2 class="section-title">Scan pulse</h2>
         <div class="status-tile">
           <span class="mini-title">Actionable findings</span>
-          <strong id="latest-actionable">0</strong>
-          <div class="delta-row" id="latest-deltas"></div>
+          <strong id="latest-actionable">&ndash;</strong>
+          <div class="pill-row" id="latest-deltas"></div>
         </div>
-      </div>
+        <div class="status-tile">
+          <span class="mini-title">Risk bands</span>
+          <div class="pill-row" id="risk-bands"></div>
+        </div>
+      </aside>
+    </section>
 
-      <div class="status-tile">
-        <span class="mini-title">Risk bands</span>
-        <div class="delta-row" id="risk-bands"></div>
-      </div>
+    <section class="stats-grid" aria-label="Key numbers">
+      <article class="stat-card"><span class="section-title">Highest risk</span>
+        <span class="value" id="stat-max-risk">&ndash;</span><p class="sub" id="stat-max-risk-sub"></p></article>
+      <article class="stat-card"><span class="section-title">High-risk findings</span>
+        <span class="value" id="stat-critical">&ndash;</span><p class="sub" id="stat-critical-sub"></p></article>
+      <article class="stat-card"><span class="section-title">False positives</span>
+        <span class="value" id="stat-fp">&ndash;</span><p class="sub" id="stat-fp-sub"></p></article>
+      <article class="stat-card"><span class="section-title">Triage errors</span>
+        <span class="value" id="stat-errors">&ndash;</span><p class="sub" id="stat-errors-sub"></p></article>
+      <article class="stat-card"><span class="section-title">Total findings</span>
+        <span class="value" id="stat-total">&ndash;</span><p class="sub" id="stat-total-sub"></p></article>
+    </section>
 
-      <div class="status-tile">
-        <span class="mini-title">Portfolio size</span>
-        <strong id="total-scans">0</strong>
-        <p class="footnote">Stored scans available for trend analysis and recurring issue tracking.</p>
-      </div>
-    </aside>
-  </section>
-
-  <section class="stats-grid">
-    <article class="stat-card fade-in delay-1">
-      <span class="section-title">Highest risk</span>
-      <span class="value" id="stat-max-risk">0</span>
-      <p class="sub" id="stat-max-risk-sub">Peak risk in the latest scan.</p>
-    </article>
-
-    <article class="stat-card fade-in delay-1">
-      <span class="section-title">Critical findings</span>
-      <span class="value" id="stat-critical">0</span>
-      <p class="sub" id="stat-critical-sub">Actionable findings scored 7 or higher.</p>
-    </article>
-
-    <article class="stat-card fade-in delay-2">
-      <span class="section-title">False positives</span>
-      <span class="value" id="stat-fp">0</span>
-      <p class="sub" id="stat-fp-sub">Findings filtered out by AI triage in the latest scan.</p>
-    </article>
-
-    <article class="stat-card fade-in delay-2">
-      <span class="section-title">Total findings</span>
-      <span class="value" id="stat-total-findings">0</span>
-      <p class="sub" id="stat-total-findings-sub">Scanner output captured in the latest stored report.</p>
-    </article>
-  </section>
-
-  <section class="chart-grid">
-    <article class="section-card fade-in delay-2">
-      <div class="section-head">
-        <div>
+    <section class="chart-grid">
+      <article class="section-card">
+        <div class="section-head"><div>
           <h2 class="section-title">Risk momentum</h2>
-          <p>Max risk and average actionable risk across recent scans.</p>
-        </div>
-      </div>
-      <div class="chart-wrap">
-        <canvas id="trend-chart"></canvas>
-      </div>
-    </article>
+          <p>Max and average actionable risk across recent scans of this project.</p>
+        </div></div>
+        <div class="chart" id="trend-chart"></div>
+      </article>
+      <article class="section-card">
+        <div class="section-head"><div>
+          <h2 class="section-title">Risk mix</h2>
+          <p>How the selected scan splits across bands, false positives and triage errors.</p>
+        </div></div>
+        <div id="mix-chart"></div>
+      </article>
+    </section>
 
-    <article class="section-card fade-in delay-3">
-      <div class="section-head">
-        <div>
-          <h2 class="section-title">Latest risk mix</h2>
-          <p>Where the current scan stands across high, medium, low, and false-positive buckets.</p>
-        </div>
-      </div>
-      <div class="chart-wrap">
-        <canvas id="severity-chart"></canvas>
-      </div>
-    </article>
-  </section>
+    <section class="section-card progress-card" aria-labelledby="progress-title">
+      <div class="section-head"><div>
+        <h2 class="section-title" id="progress-title">Remediation progress</h2>
+        <p id="progress-sub">Compared with the previous scan of this project (matched on rule, file and title).</p>
+      </div></div>
+      <div id="progress"></div>
+    </section>
 
-  <section class="split-grid">
-    <article class="section-card fade-in delay-2">
-      <div class="section-head">
-        <div>
+    <section class="section-card" id="explorer" aria-labelledby="explorer-title" tabindex="-1">
+      <div class="section-head"><div>
+        <h2 class="section-title" id="explorer-title">Findings explorer</h2>
+        <p>Every finding in the selected scan. Select a row for the AI reasoning and remediation.</p>
+      </div></div>
+      <form class="toolbar" id="explorer-form" role="search">
+        <label class="control grow">
+          <span class="control-label">Search</span>
+          <input type="search" id="f-q" placeholder="Title, rule, file, CWE..." autocomplete="off">
+        </label>
+        <label class="control">
+          <span class="control-label">Status</span>
+          <select id="f-status">
+            <option value="all">All</option>
+            <option value="actionable">Actionable</option>
+            <option value="fp">False positives</option>
+            <option value="error">Triage errors</option>
+          </select>
+        </label>
+        <label class="control">
+          <span class="control-label">Risk band</span>
+          <select id="f-band">
+            <option value="">Any</option>
+            <option value="high">High (7-10)</option>
+            <option value="medium">Medium (4-6)</option>
+            <option value="low">Low (0-3)</option>
+          </select>
+        </label>
+        <label class="control">
+          <span class="control-label">Sort</span>
+          <select id="f-sort">
+            <option value="risk">Risk</option>
+            <option value="file">File</option>
+            <option value="rule">Rule</option>
+          </select>
+        </label>
+      </form>
+      <div class="table-wrap">
+        <table class="findings-table">
+          <caption class="sr-only">Findings in the selected scan</caption>
+          <thead><tr><th scope="col">Risk</th><th scope="col">Finding</th><th scope="col">Location</th><th scope="col">Status</th></tr></thead>
+          <tbody id="findings-body"></tbody>
+        </table>
+      </div>
+      <nav class="pager" aria-label="Findings pages">
+        <span id="pager-info" aria-live="polite"></span>
+        <div class="pager-buttons">
+          <button type="button" class="btn btn-ghost" id="pager-prev">&larr; Previous</button>
+          <button type="button" class="btn btn-ghost" id="pager-next">Next &rarr;</button>
+        </div>
+      </nav>
+    </section>
+
+    <section class="split-grid">
+      <article class="section-card">
+        <div class="section-head"><div>
           <h2 class="section-title">Risk hotspots</h2>
-          <p>Files absorbing the most risk in the latest scan.</p>
-        </div>
-      </div>
-      <div class="list" id="hotspots-list"></div>
-    </article>
-
-    <article class="section-card fade-in delay-3">
-      <div class="section-head">
-        <div>
+          <p>Files absorbing the most actionable risk in the selected scan.</p>
+        </div></div>
+        <div class="list" id="hotspots-list"></div>
+      </article>
+      <article class="section-card">
+        <div class="section-head"><div>
           <h2 class="section-title">Immediate priorities</h2>
           <p>The highest-risk actionable findings to tackle next.</p>
-        </div>
-      </div>
-      <div class="list" id="priorities-list"></div>
-    </article>
-  </section>
+        </div></div>
+        <div class="list" id="priorities-list"></div>
+      </article>
+    </section>
 
-  <section class="split-grid">
-    <article class="section-card fade-in delay-3">
-      <div class="section-head">
-        <div>
+    <section class="split-grid">
+      <article class="section-card">
+        <div class="section-head"><div>
           <h2 class="section-title">Recurring vulnerabilities</h2>
-          <p>Rules that keep showing up across scans.</p>
+          <p>Rules that keep showing up across this project's scans.</p>
+        </div></div>
+        <div class="table-wrap">
+          <table class="compact-table">
+            <thead><tr><th scope="col">Rule</th><th scope="col">Seen</th><th scope="col">Max risk</th><th scope="col">Scans</th></tr></thead>
+            <tbody id="recurring-body"></tbody>
+          </table>
         </div>
-      </div>
-      <table id="recurring-table">
-        <thead>
-          <tr>
-            <th>Rule</th>
-            <th>Title</th>
-            <th>Occurrences</th>
-            <th>Max risk</th>
-            <th>Scans</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-    </article>
-
-    <article class="section-card fade-in delay-3">
-      <div class="section-head">
-        <div>
+      </article>
+      <article class="section-card">
+        <div class="section-head"><div>
           <h2 class="section-title">Scan history</h2>
-          <p>Recent runs stored in the local VulnSift database.</p>
+          <p>Recent runs for this project. Select one to inspect it.</p>
+        </div></div>
+        <div class="table-wrap">
+          <table class="compact-table">
+            <thead><tr><th scope="col">Stored</th><th scope="col">Source</th><th scope="col">Actionable</th><th scope="col">Max</th><th scope="col">FP / Err</th></tr></thead>
+            <tbody id="scans-body"></tbody>
+          </table>
         </div>
-      </div>
-      <table id="scans-table">
-        <thead>
-          <tr>
-            <th>Date</th>
-            <th>Source</th>
-            <th>Findings</th>
-            <th>Actionable</th>
-            <th>Max risk</th>
-            <th>FPs</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-    </article>
-  </section>
+      </article>
+    </section>
+  </div>
 </main>
 
-<script>
-const COLORS = {
-  accent: "#0f766e",
-  accentFill: "rgba(15, 118, 110, 0.15)",
-  danger: "#d9485f",
-  dangerFill: "rgba(217, 72, 95, 0.14)",
-  warning: "#d97706",
-  success: "#2f855a",
-  muted: "#61707d",
-  grid: "rgba(24, 32, 43, 0.08)",
-  text: "#18202b",
-};
+<div class="drawer-backdrop" id="drawer-backdrop" hidden></div>
+<aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title" hidden tabindex="-1">
+  <div class="drawer-head">
+    <h2 id="drawer-title">Finding</h2>
+    <button type="button" class="btn btn-ghost" id="drawer-close" aria-label="Close finding details">Close &times;</button>
+  </div>
+  <div class="drawer-body" id="drawer-body"></div>
+</aside>
 
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
-function formatDate(value) {
-  if (!value) return "-";
-  return new Date(value).toLocaleString();
-}
-
-function truncate(value, maxLength) {
-  const text = String(value ?? "");
-  if (text.length <= maxLength) return text;
-  return `${text.slice(0, Math.max(maxLength - 3, 0))}...`;
-}
-
-function riskClass(score) {
-  if (score >= 7) return "risk-high";
-  if (score >= 4) return "risk-med";
-  return "risk-low";
-}
-
-function riskBadge(score) {
-  return `<span class="risk-badge ${riskClass(score)}">${escapeHtml(score)}</span>`;
-}
-
-function deltaClass(delta, negativeIsGood = false) {
-  if (delta === 0) return "delta-flat";
-  const good = negativeIsGood ? delta < 0 : delta > 0;
-  return good ? "delta-good" : "delta-bad";
-}
-
-function signed(delta) {
-  if (delta > 0) return `+${delta}`;
-  return String(delta);
-}
-
-function deltaPill(label, delta, negativeIsGood = false) {
-  return `<span class="delta-pill ${deltaClass(delta, negativeIsGood)}">${escapeHtml(label)} ${escapeHtml(signed(delta))}</span>`;
-}
-
-async function fetchJSON(url) {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Request failed for ${url}`);
-  }
-  return response.json();
-}
-
-function renderOverview(overview) {
-  const latest = overview.latest_scan;
-  const bands = overview.latest_risk_bands || {};
-  const deltas = overview.deltas || {};
-
-  document.getElementById("total-scans").textContent = overview.total_scans || 0;
-
-  if (!latest) {
-    document.getElementById("hero-summary").textContent =
-      "No scans stored yet. Run `vulnsift store --input report.json` to start building trends.";
-    document.getElementById("latest-deltas").innerHTML =
-      '<span class="delta-pill delta-flat">Waiting for first scan</span>';
-    document.getElementById("risk-bands").innerHTML =
-      '<span class="band-pill band-medium">No findings yet</span>';
-    return;
-  }
-
-  document.getElementById("meta-source").textContent = latest.source_file || "Unknown source";
-  document.getElementById("meta-timestamp").textContent = formatDate(latest.timestamp);
-  document.getElementById("hero-summary").textContent =
-    `Latest scan from ${latest.source_file} surfaced ${latest.actionable_findings} actionable finding(s) with a max risk of ${latest.max_risk}.`;
-
-  document.getElementById("latest-actionable").textContent = latest.actionable_findings;
-  document.getElementById("latest-deltas").innerHTML = [
-    deltaPill("Actionable", deltas.actionable_findings || 0, true),
-    deltaPill("Critical", deltas.critical_findings || 0, true),
-    deltaPill("FPs", deltas.false_positives || 0, false),
-  ].join("");
-
-  document.getElementById("risk-bands").innerHTML = [
-    `<span class="band-pill band-critical">Critical ${escapeHtml(bands.critical || 0)}</span>`,
-    `<span class="band-pill band-medium">Medium ${escapeHtml(bands.medium || 0)}</span>`,
-    `<span class="band-pill band-low">Low ${escapeHtml(bands.low || 0)}</span>`,
-  ].join("");
-
-  document.getElementById("stat-max-risk").textContent = latest.max_risk || 0;
-  document.getElementById("stat-max-risk-sub").textContent =
-    `Delta vs previous scan: ${signed(deltas.max_risk || 0)}.`;
-
-  document.getElementById("stat-critical").textContent = bands.critical || 0;
-  document.getElementById("stat-critical-sub").textContent =
-    `Delta vs previous scan: ${signed(deltas.critical_findings || 0)}.`;
-
-  document.getElementById("stat-fp").textContent = latest.false_positives || 0;
-  document.getElementById("stat-fp-sub").textContent =
-    `Delta vs previous scan: ${signed(deltas.false_positives || 0)}.`;
-
-  document.getElementById("stat-total-findings").textContent = latest.total_findings || 0;
-  document.getElementById("stat-total-findings-sub").textContent =
-    `Delta vs previous scan: ${signed(deltas.total_findings || 0)}.`;
-}
-
-function renderTrendChart(trends) {
-  const ctx = document.getElementById("trend-chart");
-  if (!trends.length) return;
-
-  new Chart(ctx, {
-    type: "line",
-    data: {
-      labels: trends.map((trend) => new Date(trend.timestamp).toLocaleDateString()),
-      datasets: [
-        {
-          label: "Max risk",
-          data: trends.map((trend) => trend.max_risk),
-          borderColor: COLORS.danger,
-          backgroundColor: COLORS.dangerFill,
-          fill: true,
-          tension: 0.35,
-          pointRadius: 3,
-        },
-        {
-          label: "Avg actionable risk",
-          data: trends.map((trend) => trend.avg_risk),
-          borderColor: COLORS.accent,
-          backgroundColor: COLORS.accentFill,
-          fill: true,
-          tension: 0.35,
-          pointRadius: 3,
-        },
-      ],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: {
-          labels: {
-            color: COLORS.text,
-            font: { family: "Space Grotesk", size: 12, weight: "700" },
-          },
-        },
-      },
-      scales: {
-        x: {
-          grid: { color: COLORS.grid },
-          ticks: { color: COLORS.muted, font: { family: "IBM Plex Mono", size: 11 } },
-        },
-        y: {
-          beginAtZero: true,
-          max: 10,
-          grid: { color: COLORS.grid },
-          ticks: { color: COLORS.muted, font: { family: "IBM Plex Mono", size: 11 } },
-        },
-      },
-    },
-  });
-}
-
-function renderSeverityChart(overview) {
-  const latest = overview.latest_scan;
-  if (!latest) return;
-  const bands = overview.latest_risk_bands || {};
-
-  new Chart(document.getElementById("severity-chart"), {
-    type: "doughnut",
-    data: {
-      labels: ["Critical", "Medium", "Low", "False positives"],
-      datasets: [
-        {
-          data: [
-            bands.critical || 0,
-            bands.medium || 0,
-            bands.low || 0,
-            latest.false_positives || 0,
-          ],
-          backgroundColor: [COLORS.danger, COLORS.warning, COLORS.success, COLORS.muted],
-          borderWidth: 0,
-        },
-      ],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: {
-          position: "bottom",
-          labels: {
-            color: COLORS.text,
-            padding: 14,
-            font: { family: "Space Grotesk", size: 12, weight: "700" },
-          },
-        },
-      },
-      cutout: "68%",
-    },
-  });
-}
-
-function renderHotspots(hotspots) {
-  const container = document.getElementById("hotspots-list");
-  if (!hotspots.length) {
-    container.innerHTML = '<div class="empty">No hotspot data yet.</div>';
-    return;
-  }
-
-  container.innerHTML = hotspots.map((spot) => `
-    <article class="list-item">
-      <div>
-        <strong class="mono">${escapeHtml(truncate(spot.file_path, 60))}</strong>
-        <p>${escapeHtml(spot.finding_count)} finding(s), ${escapeHtml(spot.high_risk_count)} high-risk, avg risk ${escapeHtml(spot.avg_risk)}</p>
-      </div>
-      ${riskBadge(spot.max_risk)}
-    </article>
-  `).join("");
-}
-
-function renderPriorities(priorities) {
-  const container = document.getElementById("priorities-list");
-  if (!priorities.length) {
-    container.innerHTML = '<div class="empty">No actionable priorities yet.</div>';
-    return;
-  }
-
-  container.innerHTML = priorities.map((item) => `
-    <article class="list-item">
-      <div>
-        <strong>${escapeHtml(item.title)}</strong>
-        <p><code>${escapeHtml(item.rule_id)}</code> in <span class="mono">${escapeHtml(truncate(item.file_path, 50))}</span></p>
-        <p>${escapeHtml(item.remediation_title || "Review manually and decide next step.")}</p>
-      </div>
-      ${riskBadge(item.risk_score)}
-    </article>
-  `).join("");
-}
-
-function renderRecurring(recurring) {
-  const tbody = document.querySelector("#recurring-table tbody");
-  if (!recurring.length) {
-    tbody.innerHTML = '<tr><td colspan="5"><div class="empty">No recurring vulnerability data yet.</div></td></tr>';
-    return;
-  }
-
-  tbody.innerHTML = recurring.map((item) => `
-    <tr>
-      <td><code>${escapeHtml(item.rule_id)}</code></td>
-      <td>${escapeHtml(item.title)}</td>
-      <td>${escapeHtml(item.occurrences)}</td>
-      <td>${riskBadge(item.max_risk)}</td>
-      <td>${escapeHtml(item.scan_count)}</td>
-    </tr>
-  `).join("");
-}
-
-function renderScans(scans) {
-  const tbody = document.querySelector("#scans-table tbody");
-  if (!scans.length) {
-    tbody.innerHTML = '<tr><td colspan="6"><div class="empty">No scans yet. Run <code>vulnsift store --input report.json</code> to start tracking history.</div></td></tr>';
-    return;
-  }
-
-  tbody.innerHTML = scans.map((scan) => `
-    <tr>
-      <td>${escapeHtml(formatDate(scan.timestamp))}</td>
-      <td class="mono">${escapeHtml(truncate(scan.source_file, 36))}</td>
-      <td>${escapeHtml(scan.total_findings)}</td>
-      <td>${escapeHtml(scan.actionable_findings)}</td>
-      <td>${riskBadge(scan.max_risk)}</td>
-      <td>${escapeHtml(scan.false_positives)}</td>
-    </tr>
-  `).join("");
-}
-
-async function loadDashboard() {
-  try {
-    const [overview, trends, hotspots, priorities, recurring, scans] = await Promise.all([
-      fetchJSON("/api/overview"),
-      fetchJSON("/api/trends"),
-      fetchJSON("/api/hotspots"),
-      fetchJSON("/api/priorities"),
-      fetchJSON("/api/recurring"),
-      fetchJSON("/api/scans"),
-    ]);
-
-    renderOverview(overview);
-    renderTrendChart(trends);
-    renderSeverityChart(overview);
-    renderHotspots(hotspots);
-    renderPriorities(priorities);
-    renderRecurring(recurring);
-    renderScans(scans);
-  } catch (error) {
-    document.getElementById("hero-summary").textContent =
-      "The dashboard could not load its data right now. Check the local API routes and database file.";
-  }
-}
-
-loadDashboard();
-</script>
+<footer class="footer">VulnSift dashboard &middot; data stays on this machine.</footer>
 </body>
 </html>

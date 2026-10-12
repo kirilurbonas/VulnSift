@@ -12,14 +12,39 @@ def render_remediation_card(entry: TriageReportEntry) -> str:
     card = entry.remediation
     if not card:
         return ""
+    f = entry.finding
+    location = f.location.file_path or "(unknown file)"
+    if f.location.start_line is not None:
+        location += f":{f.location.start_line}"
+    meta = [
+        f"**Risk:** {entry.triage.risk_score}/10",
+        f"**Rule:** `{f.rule_id or f.id}`",
+        f"**Location:** `{location}`",
+    ]
+    if f.severity:
+        meta.append(f"**Scanner severity:** {f.severity}")
+    if f.cve:
+        meta.append(f"**CVE:** {f.cve}")
+    if f.cwe:
+        meta.append(f"**CWE:** {f.cwe}")
+    if entry.triage.confidence is not None:
+        meta.append(f"**Confidence:** {entry.triage.confidence}/10")
     lines = [
-        f"# {card.title}",
+        f"# {card.title or f.title}",
         "",
+        " · ".join(meta),
+        "",
+    ]
+    if entry.triage.reasoning:
+        lines.extend(["## Why it matters", entry.triage.reasoning, ""])
+    if entry.triage.exploitability_notes:
+        lines.extend(["## Exploitability", entry.triage.exploitability_notes, ""])
+    lines.extend([
         "## Business impact",
         card.business_impact,
         "",
         "## Steps to fix",
-    ]
+    ])
     for i, step in enumerate(card.steps, 1):
         lines.append(f"{i}. {step}")
     if card.code_snippet:
@@ -43,8 +68,11 @@ def render_remediation_cards(
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    # Remove cards from previous runs so the directory reflects this report only.
+    for stale in output_dir.glob("remediation_*.md"):
+        stale.unlink(missing_ok=True)
     if only_actionable:
-        entries = [e for e in entries if not e.triage.is_likely_false_positive]
+        entries = [e for e in entries if e.is_actionable]
     written: list[Path] = []
     for i, entry in enumerate(entries):
         if not entry.remediation:
@@ -69,7 +97,7 @@ def render_remediation_cards_single(
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     if only_actionable:
-        entries = [e for e in entries if not e.triage.is_likely_false_positive]
+        entries = [e for e in entries if e.is_actionable]
     parts: list[str] = ["# Remediation report\n"]
     for i, entry in enumerate(entries, 1):
         if not entry.remediation:

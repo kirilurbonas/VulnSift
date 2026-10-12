@@ -35,3 +35,12 @@ Thumbs.db
 *.sarif
 /output/
 /reports/
+
+# Tooling
+.ruff_cache/
+.mypy_cache/
+coverage.xml
+
+# VulnSift outputs and caches
+/vulnsift-output/
+.vulnsift/

@@ -1,22 +1,36 @@
-"""MVP triage cache: skip API calls for unchanged findings (same fingerprint + prompt + redact flag)."""
+"""Triage cache: skip API calls for findings whose content, prompt, model and context are unchanged."""
 
 from __future__ import annotations
 
 import hashlib
 import json
+import os
+import tempfile
 from pathlib import Path
 from typing import Any
 
 from vulnsift.models import RemediationCard, TriageReportEntry, TriageResult, UnifiedFinding
 
-CACHE_FILE_VERSION = "1"
+CACHE_FILE_VERSION = "2"
 
 
-def fingerprint(finding: UnifiedFinding, prompt_version: str, redact_code: bool) -> str:
-    """Stable hash for cache lookup."""
+def fingerprint(
+    finding: UnifiedFinding,
+    prompt_version: str,
+    redact_code: bool,
+    *,
+    model: str = "",
+    project_context: str | None = None,
+) -> str:
+    """Stable hash for cache lookup and de-duplication.
+
+    Line numbers are deliberately excluded: moving code without changing it should not cost a re-triage.
+    """
     payload = {
         "pv": prompt_version,
         "rc": redact_code,
+        "model": model,
+        "ctx": project_context or "",
         "rule_id": finding.rule_id,
         "title": finding.title,
         "message": finding.message,
@@ -25,7 +39,6 @@ def fingerprint(finding: UnifiedFinding, prompt_version: str, redact_code: bool)
         "cve": finding.cve,
         "cwe": finding.cwe,
         "file_path": finding.location.file_path,
-        "start_line": finding.location.start_line,
         "snippet": finding.location.snippet,
         "source_format": finding.source_format,
     }
@@ -65,7 +78,15 @@ def save_cache(
         "prompt_version": prompt_version,
         "entries": entries_map,
     }
-    path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+    # Atomic write: a crash mid-save must not corrupt the cache.
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, indent=2, default=str)
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
 
 
 def cache_entry_to_report_entry(finding: UnifiedFinding, cached: dict[str, Any]) -> TriageReportEntry | None:
@@ -76,6 +97,8 @@ def cache_entry_to_report_entry(finding: UnifiedFinding, cached: dict[str, Any])
         if not isinstance(tri_raw, dict):
             return None
         triage = TriageResult.model_validate(tri_raw)
+        if triage.is_error:
+            return None
         remediation = RemediationCard.model_validate(rem_raw) if isinstance(rem_raw, dict) else None
         return TriageReportEntry(finding=finding, triage=triage, remediation=remediation)
     except Exception:
