@@ -77,7 +77,9 @@ def create_app(db_path: Path | str | None = None) -> Flask:
 
     @app.route("/api/scans", methods=["POST"])
     def api_store_scan():
-        data = request.get_json(force=True)
+        data = request.get_json(force=True, silent=True)
+        if not isinstance(data, dict) or "entries" not in data:
+            return jsonify({"error": "expected a triage report object with an 'entries' list"}), 400
         try:
             report = TriageReport.model_validate(data)
         except Exception as e:
